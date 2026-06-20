@@ -29,6 +29,12 @@ async def main():
     server = uvicorn.Server(config)
     tasks.append(asyncio.create_task(server.serve()))
 
+    # Scheduler
+    from modules.scheduler.meal_scheduler import start_scheduler, load_all_schedules
+    start_scheduler()
+    await load_all_schedules()
+    log.info("⏰ Scheduler started, jobs loaded")
+
     # Telegram Bot (optional)
     if cfg.telegram_bot_token:
         from bot import start_bot

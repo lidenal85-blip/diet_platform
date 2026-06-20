@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_status
 
 
 async def init_db() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         await db.executescript(SCHEMA)
         await db.commit()
     log.info("Database initialized: %s", DB_PATH)
@@ -134,6 +134,36 @@ async def init_db() -> None:
 
 async def get_db():
     """Async context manager for DB connection."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         yield db
+# v2: Recipes
+RECIPES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS recipes (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    mode TEXT NOT NULL,           -- quick/home/restaurant/pp
+    description TEXT,
+    ingredients TEXT NOT NULL,    -- JSON list
+    steps TEXT NOT NULL,          -- JSON list
+    calories_per_serving INTEGER,
+    protein_g REAL,
+    fat_g REAL,
+    carbs_g REAL,
+    cook_time_minutes INTEGER,
+    servings INTEGER DEFAULT 2,
+    tags TEXT,                    -- JSON list
+    source TEXT DEFAULT 'gemini',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS fridge_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    ingredients TEXT NOT NULL,    -- JSON list
+    recipe_id TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""

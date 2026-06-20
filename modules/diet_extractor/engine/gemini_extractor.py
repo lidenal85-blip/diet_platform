@@ -38,29 +38,21 @@ EXTRACTION_SYSTEM = """\
 ВОЗВРАЩАЙ ТОЛЬКО ВАЛИДНЫЙ JSON БЕЗ ПОЯСНЕНИЙ, БЕЗ МАРКДАУНА.
 """
 
-EXTRACTION_PROMPT = """\
-Извлечи информацию о диете из текста ниже.
+EXTRACTION_PROMPT = """Извлеки информацию о диете из текста ниже.
 
-Обязательная схема ответа:
-{
-  "diet_name": "string",
-  "allowed_foods": ["string"],
-  "forbidden_foods": ["string"],
-  "menu_structure": {
-    "breakfast": ["string"],
-    "lunch":     ["string"],
-    "dinner":    ["string"],
-    "snacks":    ["string"]
-  },
-  "contraindications": ["string"],
-  "conditions":        ["string"],
-  "confidence_score":  0.0
-}
+Верни только JSON-объект со следующими полями (без пояснений):
+diet_name - название диеты (string)
+allowed_foods - разрешённые продукты (array of strings)
+forbidden_foods - запрещённые продукты (array of strings)
+menu_structure - план питания с ключами breakfast, lunch, dinner, snacks (object)
+contraindications - медицинские противопоказания (array of strings)
+conditions - заболевания/состояния для которых подходит диета (array of strings)
+confidence_score - уверенность от 0.0 до 1.0
 
 Правила:
-- confidence_score 0.0–1.0: < 0.4 если недостаточно данных
+- confidence_score < 0.4 если в тексте недостаточно данных о диете
 - Не выдумывай данные которых нет в тексте
-- allowed_foods / forbidden_foods — конкретные продукты
+- allowed_foods / forbidden_foods — конкретные продукты, не категории
 
 Текст:
 {text}
@@ -90,9 +82,25 @@ def _heuristic_extract(text: str) -> dict:
     }
 
 
+
+def _clean_llm_json(raw: str) -> str:
+    """Надёжная очистка LLM-ответа перед json.loads.
+    Обрабатывает: leading newlines, markdown blocks, JSON внутри текста.
+    """
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\n?\s*```\s*$", "", raw)
+    raw = raw.strip()
+    if not raw.startswith("{"):
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if m:
+            raw = m.group(0)
+    return raw.strip()
+
+
 async def _llm_extract(clean_text: str, trace_id: str) -> Optional[dict]:
     """LLM экстракция: Leviathan LLMFactory (KeyPool+CB) или fallback google.genai."""
-    prompt = EXTRACTION_PROMPT.format(text=clean_text[:8000])
+    prompt = EXTRACTION_PROMPT.replace("{text}", clean_text[:8000])
 
     # ── Приоритет 1: Leviathan Core LLMFactory ──────────────────
     if _LEVIATHAN_CORE:
@@ -105,8 +113,7 @@ async def _llm_extract(clean_text: str, trace_id: str) -> Optional[dict]:
                 fallback=True,
                 task_type="structured",
             )
-            raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
-            raw = re.sub(r"\n?```$", "", raw)
+            raw = _clean_llm_json(raw)
             result = json.loads(raw)
             log.info("[%s] Leviathan LLMFactory OK: %s conf=%.2f",
                      trace_id, result.get("diet_name", "?"), result.get("confidence_score", 0))
@@ -144,8 +151,7 @@ async def _llm_extract(clean_text: str, trace_id: str) -> Optional[dict]:
                     config=_types.GenerateContentConfig(temperature=0.1, max_output_tokens=2048),
                 )
                 raw = response.text.strip()
-                raw = re.sub(r"^```(?:json)?\n?", "", raw)
-                raw = re.sub(r"\n?```$", "", raw)
+                raw = _clean_llm_json(raw)
                 result = json.loads(raw)
                 log.info("[%s] google.genai fallback OK conf=%.2f",
                          trace_id, result.get("confidence_score", 0))

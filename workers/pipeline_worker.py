@@ -83,6 +83,7 @@ async def _process_fetch_task(db: aiosqlite.Connection, task: dict) -> None:
             await db.execute(
                 "UPDATE outbox SET status='dlq' WHERE id=?", (task_id,)
             )
+            await _update_session_progress(db, session_id)  # BUG-03 fix
             await db.commit()
             return
 
@@ -111,6 +112,7 @@ async def _handle_failure(
     attempt = task["attempt"] + 1
     max_attempts = task["max_attempts"]
 
+    session_id = payload.get("session_id", "-")
     if attempt >= max_attempts:
         log.warning("Max attempts reached for task %s, moving to DLQ", task["id"])
         await _to_dlq(db, task, error, payload)
@@ -118,6 +120,7 @@ async def _handle_failure(
             "UPDATE outbox SET status='dlq', error=? WHERE id=?",
             (error, task["id"])
         )
+        await _update_session_progress(db, session_id)  # BUG-03 fix
     else:
         # Exponential backoff: 2^attempt * 5 seconds
         delay_seconds = min(5 * (2 ** attempt), 300)
@@ -175,7 +178,7 @@ async def run_worker_loop() -> None:
 
     while True:
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with aiosqlite.connect(DB_PATH, timeout=30) as db:
                 db.row_factory = aiosqlite.Row
                 now = datetime.utcnow().isoformat()
 

@@ -75,7 +75,7 @@ async def start_search(req: SearchRequest):
     trace_id = new_trace_id()
     set_trace_context(trace_id)
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         session_id = await initiate_search(db, req.query.strip(), req.user_id)
 
@@ -89,7 +89,7 @@ async def start_search(req: SearchRequest):
 
 @app.get("/api/v1/sessions/{session_id}")
 async def get_session_status(session_id: str):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM search_sessions WHERE id=?", (session_id,)
@@ -129,7 +129,7 @@ async def list_diets(
     _singleflight[cache_key] = fut
 
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with aiosqlite.connect(DB_PATH, timeout=30) as db:
             db.row_factory = aiosqlite.Row
             diets = await search_diets(db, query=q or "", status=status,
                                        limit=limit, offset=offset)
@@ -145,7 +145,7 @@ async def list_diets(
 
 @app.get("/api/v1/diets/{diet_id}")
 async def get_diet(diet_id: str):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         diet = await get_diet_by_id(db, diet_id)
     if not diet:
@@ -157,7 +157,7 @@ async def get_diet(diet_id: str):
 async def verify_diet_endpoint(diet_id: str, req: VerifyRequest):
     """Moderator endpoint: одобрение/отклонение диеты."""
     trace_id = new_trace_id()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         ok = await verify_diet(db, diet_id, req.approved, req.actor, trace_id)
     if not ok:
@@ -171,7 +171,7 @@ async def list_pending(
     offset: int = Query(0, ge=0),
 ):
     """Moderation queue: диеты на проверке."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         diets = await search_diets(db, status="pending_verification",
                                    limit=limit, offset=offset)
@@ -181,10 +181,49 @@ async def list_pending(
 @app.get("/api/v1/dlq")
 async def list_dlq(limit: int = Query(20, ge=1, le=100)):
     """DLQ: необработанные задачи для инженеров."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM dlq ORDER BY failed_at DESC LIMIT ?", (limit,)
         ) as cur:
             rows = await cur.fetchall()
     return {"items": [dict(r) for r in rows], "count": len(rows)}
+
+
+
+
+@app.post("/api/v1/dlq/retry-all")
+async def retry_dlq_all():
+    """DLQ Retry Dashboard: возвращает все DLQ-задачи в pending."""
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM dlq") as cur:
+            items = await cur.fetchall()
+        count = 0
+        for item in items:
+            d = dict(item)
+            # Возвращаем в outbox с обнулённым attempt
+            await db.execute(
+                "UPDATE outbox SET status='pending', attempt=0, error=NULL, "
+                "scheduled_at=datetime('now') WHERE id=?",
+                (d["outbox_id"],)
+            )
+            count += 1
+        await db.commit()
+    return {"retried": count}
+
+
+@app.delete("/api/v1/dlq/{dlq_id}")
+async def delete_dlq_item(dlq_id: str):
+    """DLQ: удалить запись вручную."""
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
+        await db.execute("DELETE FROM dlq WHERE id=?", (dlq_id,))
+        await db.commit()
+    return {"ok": True, "deleted": dlq_id}
+# Cabinet web UI
+from api.cabinet_router import router as cabinet_router  # noqa
+app.include_router(cabinet_router)
+
+# Mini App
+from api.miniapp_router import router as miniapp_router  # noqa
+app.include_router(miniapp_router)

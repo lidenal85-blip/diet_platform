@@ -9,3 +9,6 @@ logs/
 venv/
 .venv/
 *.bak
+*.bak_*
+*.swp
+.*.swp

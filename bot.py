@@ -11,7 +11,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
     CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
-    ReplyKeyboardRemove,
+    ReplyKeyboardRemove, WebAppInfo,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -33,17 +33,11 @@ router = Router()
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     keyboard=[
-        [
-            KeyboardButton(text="🔍 Найти диету"),
-            KeyboardButton(text="🥗 Мои диеты"),
-        ],
-        [
-            KeyboardButton(text="⏳ Ожидают оценки"),
-            KeyboardButton(text="🚨 Ошибки (DLQ)"),
-        ],
-        [
-            KeyboardButton(text="ℹ️ Помощь"),
-        ],
+        [KeyboardButton(text="🎯 Подобрать диету"), KeyboardButton(text="👤 Кабинет")],
+        [KeyboardButton(text="🍝 Рецепт от Пухляша"), KeyboardButton(text="👨‍🍳 Рецепты")],
+        [KeyboardButton(text="🧊 Холодильник"), KeyboardButton(text="💰 По бюджету")],
+        [KeyboardButton(text="👨‍🍳 Шеф на телефоне"), KeyboardButton(text="⏰ Расписание")],
+        [KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
     persistent=True,
@@ -58,21 +52,27 @@ def _main_kb() -> ReplyKeyboardMarkup:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
+    webapp_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📱 Открыть кабинет",
+            web_app=WebAppInfo(url=f"https://leviathanstory.ru/diet/app?uid={message.from_user.id}")
+        )
+    ]])
     await message.answer(
-        "🥬 <b>Diet Platform Bot</b> («Пухляш»)\n\n"
-        "Автоматически ищу и структурирую диеты из интернета.\n\n"
-        "🔧 <b>Команды:</b>\n"
-        "/search &lt;запрос&gt; — найти диету\n"
-        "/diets — список верифицированных диет\n"
-        "/status &lt;session_id&gt; — статус поиска\n"
-        "/pending — диеты на оценке\n"
-        "/dlq — ошибки обработки\n"
-        "/health — статус сервиса",
+        "🍝 <b>Пухляш</b> — свой парень, накормит вкусно 😋\n\n"
+        "🎯 <b>Что умею:</b>\n"
+        "• Подберу диету под тебя\n"
+        "• Предложу рецепты по твоему уровню\n"
+        "• Напомню когда есть\n"
+        "• Пришлю рецепт дня в личку\n\n"
+        "⬇️ Нажми что хочешь или настрой профиль:",
         parse_mode="HTML",
         reply_markup=_main_kb(),
     )
-
-
+    await message.answer(
+        "📱 Настрой профиль в кабинете:",
+        reply_markup=webapp_kb
+    )
 # ── /help ──────────────────────────────────────────────
 
 @router.message(Command("help"))
@@ -137,7 +137,7 @@ async def cmd_search(message: Message):
 
     msg = await message.answer(f"🔍 Ищу: <b>{query}</b>\n\n…", parse_mode="HTML", reply_markup=_main_kb())
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         session_id = await initiate_search(db, query, user_id)
 
@@ -179,7 +179,7 @@ async def handle_freetext_search(message: Message):
 
     msg = await message.answer(f"🔍 Ищу: <b>{query}</b>\n\n…", parse_mode="HTML", reply_markup=_main_kb())
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         session_id = await initiate_search(db, query, user_id)
 
@@ -201,7 +201,7 @@ async def cmd_status(message: Message):
         return
 
     session_id_part = parts[1].strip()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM search_sessions WHERE id LIKE ?",
@@ -237,12 +237,12 @@ async def cmd_diets(message: Message):
     if len(parts) > 1 and parts[0].startswith("/"):
         query = parts[1].strip()
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         diets = await search_diets(db, query=query, status="approved", limit=8)
 
     if not diets:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with aiosqlite.connect(DB_PATH, timeout=30) as db:
             db.row_factory = aiosqlite.Row
             diets = await search_diets(db, query=query,
                                        status="pending_verification", limit=8)
@@ -277,7 +277,7 @@ async def cmd_diets(message: Message):
 @router.message(Command("pending"))
 @router.message(F.text == "⏳ Ожидают оценки")
 async def cmd_pending(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         diets = await search_diets(db, status="pending_verification", limit=10)
 
@@ -308,7 +308,7 @@ async def cmd_pending(message: Message):
 @router.message(Command("dlq"))
 @router.message(F.text == "🚨 Ошибки (DLQ)")
 async def cmd_dlq(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM dlq ORDER BY failed_at DESC LIMIT 10"
@@ -334,7 +334,7 @@ async def cmd_dlq(message: Message):
 # ── Деталь диеты (callback) ────────────────────────────
 
 async def _send_diet_detail(callback: CallbackQuery, diet_id: str, with_moderation: bool = False):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         diet = await get_diet_by_id(db, diet_id)
 
@@ -392,7 +392,7 @@ async def verify_callback(callback: CallbackQuery):
     approved = action == "approve"
     trace_id = new_trace_id()
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         ok = await verify_diet(db, diet_id, approved, "moderator", trace_id)
 
@@ -408,8 +408,23 @@ async def verify_callback(callback: CallbackQuery):
 # ── запуск ───────────────────────────────────────────
 
 async def start_bot():
+    from bot_handlers.recipes import router as recipes_router
+    from bot_handlers.schedule import router as schedule_router
+    from bot_handlers.diet_picker import router as picker_router
+    from bot_handlers.reactions import router as reactions_router
+    from bot_handlers.meal_schedule_v2 import router as meal_v2_router
+    from bot_handlers.cabinet import router as cabinet_router
+    from bot_handlers.puhlyash_settings import router as puhlyash_router
+    from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=cfg.telegram_bot_token)
-    dp = Dispatcher()
-    dp.include_router(router)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(reactions_router)  # callbacks: лайки, мастер
+    dp.include_router(puhlyash_router)   # настройка Пухляша + тест
+    dp.include_router(meal_v2_router)    # расписание v2
+    dp.include_router(cabinet_router)    # FSM кабинета
+    dp.include_router(picker_router)     # FSM подбора диеты
+    dp.include_router(recipes_router)    # FSM рецептов
+    dp.include_router(schedule_router)   # старый schedule (fallback)
+    dp.include_router(router)            # общие хендлеры
     log.info("🥬 Telegram bot (Пухляш) starting...")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"], polling_timeout=20)

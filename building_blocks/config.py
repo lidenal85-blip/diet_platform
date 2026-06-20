@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = ""
 
+    # Userbot Relay (den4ik-claude) — см. CONFLICT-01 в TEAM_NOTES.md
+    userbot_relay_token: str = ""
+
     # Search
     serpapi_key: str = ""
     max_urls_per_query: int = 5
