@@ -141,13 +141,17 @@ scheduler, recipes), TEAM_NOTES.md + PRODUCT_BACKLOG.md
 
 ### [Открытые, не критичные]
 - ISSUE-03: `urllib.request` (sync) в `recipes/engine.py`, `fitness/engine.py`, `puhlyash/persona.py`
-  → блокирует event loop, нужно заменить на httpx.AsyncClient
+  → блокирует event loop. ЧАСТИЧНО исправлено 2026-06-21 (J2 — chef_chat в
+bot_handlers/recipes.py переведён на LLMFactory). Остались `modules/recipes/engine.py`,
+`modules/fitness/engine.py`, `modules/puhlyash/persona.py` — большой рефактор, не тронуты намеренно
 - ISSUE-04: Нет `__init__.py` в `search_gateway/`, `web_scraper/`, `diet_extractor/`, `diet_registry/`
 - ISSUE-06: confidence_score низкий (0.15–0.35) из-за CircuitBreaker на Gemini/Groq в момент
   retry — fallback на эвристики. Не баг, но все 12 диет сейчас в pending_verification
   с низким confidence — модератору нужно вручную проверить перед публикацией
 - ISSUE-07: outbox пуст — новых задач нет, ждём новых /search от пользователей
   чтобы проверить pipeline на живых данных
+- J4 (из трассировки 2026-06-20): два независимых онбординга (diet_picker и cabinet)
+  пишут в одну user_profiles — связано с G2 в PRODUCT_BACKLOG.md
 - `modules/notifier/sender.py` (старая версия) использовал `logging.getLogger(__name__)`
   без настройки — в новой версии то же самое, не критично
 
@@ -210,6 +214,21 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 ---
 
 ## 📅 CHANGELOG
+
+### 2026-06-21 — J1/J2/J3 фиксы + инцидент с den4ik-claude (Claude / Leviathan Agent)
+- **Инцидент:** при рутинной проверке обнаружен `den4ik-claude` в статусе `failed`
+  — явный `systemctl stop` 11 часов назад (вероятно через самого бота,
+  не моя правка). `Restart=always` не сработал, т.к. стоп был осознанным, не
+  крашем. Всё это время Userbot Relay был недоступен. Поднял, проверено —
+  оба сервиса снова `active`.
+- J1 исправлен: последний оставшийся `aiosqlite.connect()` без timeout (алиас `_DB`
+  в meal_schedule_v2.py) — проверено `grep` по всему репо, больше ни одного случая
+- J2 исправлен: «Шеф на телефоне» переведён с raw urllib+регекс-чтения .env на
+  LLMFactory.execute_request() — смоук-тест прошёл с реальным ответом от Gemini
+- J3 исправлен: убраны остаточные `print([DEBUG]...)` из recipes.py
+- Зафиксировано новое требование в PRODUCT_BACKLOG.md — настраиваемая видимость
+  блоков дашборда/напоминаний через профиль/кабинет (расширение E4)
+- Сделана полная трассировка пользовательского пути по всему bot.py — найдены J1-J4
 
 ### 2026-06-20 — GitHub push решён (Claude / Leviathan Agent)
 - Исходный токен `lidenal85-blip` был мёртв; два альтернативных токена

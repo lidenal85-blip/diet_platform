@@ -1,6 +1,5 @@
 """Bot handlers v2: Рецепты, Холодильник, Бюджет, Шеф на телефоне."""
-import json, re, random
-import urllib.request
+import json, sys
 import aiosqlite
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
@@ -12,6 +11,30 @@ from modules.recipes.engine import generate_recipe, generate_from_fridge, genera
 
 log = get_logger(__name__)
 router = Router()
+
+sys.path.insert(0, "/opt/leviathan_engine")
+try:
+    from llm_factory import LLMFactory
+    _LEVIATHAN_CORE = True
+except ImportError:
+    _LEVIATHAN_CORE = False
+    log.warning("⚠️ LLMFactory недоступен в recipes.py, Чеф на телефоне не будет работать")
+
+
+async def _ask_llm(prompt: str, system: str) -> str:
+    """Свободный чат («Шеф на телефоне») через Leviathan LLMFactory:
+    KeyPool + CircuitBreaker + fallback на Groq, вместо raw urllib + ручной ротации ключей.
+    """
+    if not _LEVIATHAN_CORE:
+        raise RuntimeError("LLMFactory недоступен")
+    return await LLMFactory.execute_request(
+        prompt=prompt,
+        system=system,
+        model="gemini-2.5-flash",
+        driver="gemini",
+        fallback=True,
+        task_type="default",
+    )
 
 
 class RecipeStates(StatesGroup):
@@ -86,7 +109,7 @@ async def _save(recipe: dict):
 # ── Рецепты ───────────────────────────────────────────────
 @router.message(F.text == "👨‍🍳 Рецепты")
 async def btn_recipes(message: Message, state: FSMContext):
-    print(f"[DEBUG] btn_recipes called from {message.from_user.id}", flush=True)
+    log.info("btn_recipes called from %s", message.from_user.id)
     await state.set_state(RecipeStates.waiting_query)
     await message.answer(
         "👨‍🍳 <b>Рецепты</b>\n\nЧто хочешь приготовить?\nНапример: <code>паста карбонара</code>",
@@ -96,7 +119,6 @@ async def btn_recipes(message: Message, state: FSMContext):
 
 @router.message(RecipeStates.waiting_query, F.text.in_(list(MODE_MAP.keys())))
 async def recipe_query_is_mode(message: Message, state: FSMContext):
-    print(f"[DEBUG] recipe_query_is_mode: {message.text}", flush=True)
     """User сразу выбрал режим без запроса — генерируем случайное блюдо."""
     mode = MODE_MAP[message.text]
     await state.clear()
@@ -257,36 +279,26 @@ async def chef_chat(message: Message, state: FSMContext):
     history = data.get("history", [])
     msg = await message.answer("👨‍🍳 Думаю…")
     try:
-        env = open("/opt/leviathan_engine/agent_service/.env").read()
-        keys = re.findall(r'GEMINI_K\d+=([^\s]+)', env)
-        random.shuffle(keys)
         sys_chef = "Ты опытный шеф-повар. Отвечай кратко, практично, по делу. На русском."
-        history.append({"role": "user", "parts": [{"text": message.text}]})
-        for key in keys:
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"gemini-3.1-flash-lite:generateContent?key={key}")
-            body = json.dumps({
-                "system_instruction": {"parts": [{"text": sys_chef}]},
-                "contents": history[-10:],
-                "generationConfig": {"temperature": 0.8, "maxOutputTokens": 800}
-            }).encode()
-            try:
-                req = urllib.request.Request(
-                    url, body, {"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    answer = json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-                history.append({"role": "model", "parts": [{"text": answer}]})
-                await state.update_data(history=history[-20:])
-                await msg.delete()
-                await message.answer(f"👨‍🍳 {answer}")
-                return
-            except Exception as e:
-                if any(x in str(e) for x in ["403", "429", "503"]):
-                    continue
-                raise
-        await message.answer("❌ Gemini недоступен, попробуй позже")
+        history.append({"role": "user", "text": message.text})
+        # LLMFactory не принимает multi-turn contents напрямую — сворачиваем
+        # историю в один промпт (последние 10 реплик)
+        dialogue = "\n".join(
+            f"{'Пользователь' if h['role']=='user' else 'Шеф'}: {h['text']}"
+            for h in history[-10:]
+        )
+        answer = await _ask_llm(prompt=dialogue, system=sys_chef)
+        history.append({"role": "model", "text": answer})
+        await state.update_data(history=history[-20:])
+        await msg.delete()
+        await message.answer(f"👨‍🍳 {answer}")
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        log.error("chef_chat: %s", e)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        await message.answer("❌ Шеф сейчас занят, попробуй позже")
 
 
 # ── Назад ────────────────────────────────────────────────

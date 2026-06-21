@@ -249,14 +249,14 @@ async def _schedule_meal(tg_id: str, meal_name: str, time_str: str):
         if scheduler.get_job(job_id): scheduler.remove_job(job_id)
 
         async def _fire(uid=tg_id, name=meal_name):
-            async with aiosqlite.connect(_DB) as db:
+            async with aiosqlite.connect(_DB, timeout=30) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
                     "SELECT enabled FROM meal_schedule WHERE tg_id=? AND meal_name=?", (uid, name)
                 ) as c:
                     row = await c.fetchone()
             if not row or not row["enabled"]: return
-            async with aiosqlite.connect(_DB) as db:
+            async with aiosqlite.connect(_DB, timeout=30) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute("SELECT * FROM user_profiles WHERE tg_id=?", (uid,)) as c:
                     prof = await c.fetchone()
