@@ -94,7 +94,36 @@ Telegram-команды den4ik-claude.
 
 ---
 
-## 🔴 БАГИ (актуально на 2026-06-19, вечер)
+## ✅ GitHub Push — РЕШЕНО (2026-06-20)
+
+**Была проблема:** исходный PAT для `lidenal85-blip` был мёртв (401 Bad
+credentials). Два других токена, которые пробовали вместо него —
+`den4ikorm1985` и `lewinthinkman-wq` — это ДРУГИЕ GitHub-аккаунты. Оба валидные,
+но имеют только `pull` на `lidenal85-blip/diet_platform` (репо публичный,
+поэтому `git fetch` работал даже с мёртвым токеном лиденал85-blip — это
+анонимное чтение, не авторизация), а `push` всё равно даёт 403 даже с
+валидным токеном. Добавить collaborator тоже не получилось этими же
+токенами — `lidenal85-blip` оказался обычным пользователем (не организацией),
+админ-действия над репо доступны только с валидным токеном самого `lidenal85-blip`.
+
+**Решение:** владелец перевыпустил PAT из-под самого `lidenal85-blip`.
+Проверено через `GET /user` (login совпал) и `GET /repos/.../diet_platform`
+(`permissions.push: true`) перед пушем. Push прошёл, SHA на GitHub совпал с
+локальным HEAD (`5a6a00c`).
+
+**Важно на будущее:**
+- При перевыпуске («Regenerate») GitHub всегда создаёт НОВУЮ строку токена —
+  старое значение никогда не оживает повторным нажатием кнопки
+- Рабочий токен сейчас вшит только в `git remote -v` (`.git/config`) — НЕ в коде,
+  НЕ в истории коммитов (проверено `git grep` по HEAD перед пушем — чисто)
+- При истечении/отзыве нового токена — входить именно в аккаунт `lidenal85-blip`
+  (Settings → Developer settings → PAT), не в любой другой аккаунт на этом сервере
+
+**Push #1 (5a6a00c):** Userbot Relay, BUG-01/02/03 фиксы, первый коммит ранее
+untracked кода (bot_handlers/, api/, modules/fitness, notifier, puhlyash, reactions,
+scheduler, recipes), TEAM_NOTES.md + PRODUCT_BACKLOG.md
+
+---
 
 ### [FIXED и ПОДТВЕРЖДЕНО]
 - BUG-01: `database is locked` (diet_platform.db) — `timeout=30` во все aiosqlite.connect()
@@ -182,6 +211,15 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 
 ## 📅 CHANGELOG
 
+### 2026-06-20 — GitHub push решён (Claude / Leviathan Agent)
+- Исходный токен `lidenal85-blip` был мёртв; два альтернативных токена
+  (`den4ikorm1985`, `lewinthinkman-wq`) оказались чужими аккаунтами без push-доступа
+- Владелец перевыпустил PAT из-под `lidenal85-blip` — push прошёл, подтверждено по SHA
+- Попутно закоммичен весь ранее untracked живой код бота (впервые в git!)
+- Расширен `.gitignore`: `*.bak_*`, `*.swp`
+- Создан `PRODUCT_BACKLOG.md` — 9 эпиков продуктовых требований от владельца,
+  фазировано на 4 фазы
+
 ### 2026-06-19, вечер — Userbot Relay (Claude / Leviathan Agent)
 - Подтверждено владельцем: den4ik-claude — тоже его проект, можно изменять
 - Рассмотрел полное слияние в 1 процесс — отклонён (разные bounded contexts,
@@ -220,3 +258,6 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
    den4ik-claude. Другим проектам нужен userbot — иди через Userbot Relay (127.0.0.1:8190),
    не создавай второй Client на той же сессии
 10. **Маскот Пухляш** — саркастичный, но добрый. Ирисочка — мягкая и мудрая. Тон важен!
+11. **GitHub push** — токен всегда должен быть из-под аккаунта `lidenal85-blip`,
+    не из других аккаунтов на этом сервере — у них только `pull`. Перед pushом
+    стоит сверить `permissions.push: true` через GitHub API
