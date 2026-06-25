@@ -1,9 +1,17 @@
 """Fitness Engine — лёгкие упражнения без снарядов через Gemini."""
-import json, re, random
-import urllib.request
+import json, sys
+sys.path.insert(0, "/opt/leviathan_engine")
 from building_blocks.logger import get_logger
 
 log = get_logger(__name__)
+
+try:
+    from llm_factory import LLMFactory
+    _LEVIATHAN_CORE = True
+    log.info("🔗 Leviathan LLMFactory подключён в fitness/engine.py")
+except ImportError:
+    _LEVIATHAN_CORE = False
+    log.warning("⚠️ LLMFactory недоступен в fitness/engine.py")
 
 MEAL_CONTEXT = {
     "breakfast": "утренная разминка до еды, 5-7 минут, лёгкая",
@@ -21,29 +29,23 @@ DIET_HINTS = {
 SYS = """Ты фитнес-тренер. Генерируй 3-4 упражнения без снарядов и без инвентаря. Отвечай строго в JSON.
 [{"name":"","description":"как делать, 1-2 предложения","reps":"","duration_sec":30}]"""
 
+FITNESS_MODEL = "gemini-3.1-flash-lite"
 
-def _gemini(prompt: str) -> str:
-    env = open("/opt/leviathan_engine/agent_service/.env").read()
-    keys = re.findall(r'GEMINI_K\d+=([^\s]+)', env)
-    random.shuffle(keys)
-    for key in keys:
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-3.1-flash-lite:generateContent?key={key}")
-        body = json.dumps({
-            "system_instruction": {"parts": [{"text": SYS}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 800}
-        }).encode()
-        try:
-            req = urllib.request.Request(
-                url, body, {"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            if any(x in str(e) for x in ["403", "429", "503"]):
-                continue
-            raise
-    raise RuntimeError("Gemini недоступен")
+
+async def _gemini(prompt: str) -> str:
+    """LLM-вызов через Leviathan LLMFactory (KeyPool + CircuitBreaker + Groq fallback)
+    вместо raw urllib + ручной ротации ключей из .env.
+    """
+    if not _LEVIATHAN_CORE:
+        raise RuntimeError("LLMFactory недоступен")
+    return await LLMFactory.execute_request(
+        prompt=prompt,
+        system=SYS,
+        model=FITNESS_MODEL,
+        driver="gemini",
+        fallback=True,
+        task_type="structured",
+    )
 
 
 def _parse(raw: str) -> list:
@@ -54,11 +56,10 @@ def _parse(raw: str) -> list:
 
 
 async def generate_exercises(meal: str, diet_mode: str = "home") -> list:
-    import asyncio
     ctx = MEAL_CONTEXT.get(meal, "лёгкая разминка")
     hint = DIET_HINTS.get(diet_mode, "")
     prompt = f"Контекст: {ctx}. Диета: {hint}. Без инвентаря, без снарядов."
-    raw = await asyncio.get_running_loop().run_in_executor(None, _gemini, prompt)
+    raw = await _gemini(prompt)
     return _parse(raw)
 
 

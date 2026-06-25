@@ -1,5 +1,5 @@
 """Callback handler: реакции на рецепты/диеты/упражнения."""
-import asyncio
+import asyncio, sys
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -8,6 +8,14 @@ from building_blocks.logger import get_logger
 from modules.reactions.engine import save_reaction, reaction_kb_with_reason
 
 log = get_logger(__name__)
+
+sys.path.insert(0, "/opt/leviathan_engine")
+try:
+    from llm_factory import LLMFactory
+    _LEV = True
+except ImportError:
+    _LEV = False
+    log.warning("LLMFactory недоступен в reactions.py")
 router = Router()
 
 
@@ -131,7 +139,6 @@ async def _start_wizard(call: CallbackQuery, item_id: str, item_title: str, stat
 
 @router.message(WizardStates.chatting)
 async def wizard_chat(message: Message, state: FSMContext):
-    import re, random, urllib.request, json
     if message.text and message.text.lower().strip() in ("стоп", "stop", "выход", "хватит"):
         await state.clear()
         return await message.answer("👨‍🍳 Опыт закончен! Приятного аппетита 😋")
@@ -154,29 +161,23 @@ async def wizard_chat(message: Message, state: FSMContext):
 
     history.append({"role": "user", "parts": [{"text": message.text}]})
     try:
-        env = open("/opt/leviathan_engine/agent_service/.env").read()
-        keys = re.findall(r'GEMINI_K\d+=([^\s]+)', env)
-        random.shuffle(keys)
-        for key in keys:
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"gemini-3.1-flash-lite:generateContent?key={key}")
-            body = json.dumps({
-                "system_instruction": {"parts": [{"text": sys_prompt}]},
-                "contents": history[-8:],
-                "generationConfig": {"temperature": 0.85, "maxOutputTokens": 350}
-            }).encode()
-            try:
-                req = urllib.request.Request(url, body, {"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=25) as r:
-                    answer = json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-                history.append({"role": "model", "parts": [{"text": answer}]})
-                await state.update_data(wizard_history=history[-12:])
-                await msg.delete()
-                await message.answer(f"👨‍🍳 {answer}")
-                return
-            except Exception as e:
-                if any(x in str(e) for x in ["403", "429", "503"]): continue
-                raise
-        await msg.edit_text("❌ Пухляш временно недоступен, попробуй позже")
+        if not _LEV:
+            raise RuntimeError("LLMFactory недоступен")
+        dialogue = "\n".join(
+            f'{"Пользователь" if h["role"]=="user" else "Пухляш"}: {h["parts"][0]["text"]}'
+            for h in history[-8:]
+        )
+        answer = await LLMFactory.execute_request(
+            prompt=dialogue,
+            system=sys_prompt,
+            model="gemini-3.1-flash-lite",
+            driver="gemini",
+            fallback=True,
+            task_type="default",
+        )
+        history.append({"role": "model", "parts": [{"text": answer}]})
+        await state.update_data(wizard_history=history[-12:])
+        await msg.delete()
+        await message.answer(f"👨‍🍳 {answer}")
     except Exception as e:
         await msg.edit_text(f"❌ {e}")

@@ -1,7 +1,12 @@
 """Bot handler: Подбор диеты — опросник + Gemini рекомендации."""
-import json, re, random
-import urllib.request
+import json, sys
 import aiosqlite
+sys.path.insert(0, "/opt/leviathan_engine")
+try:
+    from llm_factory import LLMFactory
+    _LEV = True
+except ImportError:
+    _LEV = False
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -51,81 +56,17 @@ def _activity_kb():
     ], resize_keyboard=True)
 
 
-def _gemini(prompt: str, sys: str = SYS_DIET) -> str:
-    env = open("/opt/leviathan_engine/agent_service/.env").read()
-    keys = re.findall(r'GEMINI_K\d+=([^\s]+)', env)
-    random.shuffle(keys)
-    for key in keys:
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-3.1-flash-lite:generateContent?key={key}")
-        body = json.dumps({
-            "system_instruction": {"parts": [{"text": sys}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 3000}
-        }).encode()
-        try:
-            req = urllib.request.Request(
-                url, body, {"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=60) as r:
-                return json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            if any(x in str(e) for x in ["403", "429", "503"]):
-                continue
-            raise
-    raise RuntimeError("Gemini недоступен")
-
-
-async def _get_3_diets(profile: dict) -> list:
-    import asyncio
-    goal = profile.get("goal", "")
-    age = profile.get("age", "")
-    restrictions = profile.get("restrictions", "нет")
-    activity = profile.get("activity", "")
-    prompt = f"""Пользователь: цель={goal}, возраст={age}, активность={activity}, ограничения={restrictions}
-Предложи 3 оптимальных диеты. Отвечай строго в JSON:
-[
-  {{
-    "name": "Название диеты",
-    "tagline": "Одна строка описание",
-    "pros": ["плюс 1", "плюс 2"],
-    "cons": ["минус 1"],
-    "calories_range": "1400-1600 ккал/день",
-    "duration_weeks": 4,
-    "difficulty": "лёгкая | средняя | сложная",
-    "key_foods": ["продукт 1", "продукт 2"]
-  }}
-]"""
-    raw = await asyncio.get_running_loop().run_in_executor(None, _gemini, prompt)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(raw)
-
-
-async def _get_week_plan(diet_name: str, profile: dict) -> str:
-    import asyncio
-    prompt = f"""Диета: {diet_name}
-Пользователь: цель={profile.get('goal')}, ограничения={profile.get('restrictions', 'нет')}
-Составь план питания на неделю. Отвечай в JSON:
-{{
-  "days": [
-    {{
-      "day": "Понедель",
-      "breakfast": {{"название": "", "ккал": 0}},
-      "lunch": {{"название": "", "ккал": 0}},
-      "dinner": {{"название": "", "ккал": 0}},
-      "snack": ""
-    }}
-  ],
-  "shopping_list": ["продукт 1", "продукт 2"],
-  "tips": ["совет 1", "совет 2"]
-}}"""
-    raw = await asyncio.get_running_loop().run_in_executor(None, _gemini, prompt)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(raw)
-
+async def _gemini(prompt: str, system: str = SYS_DIET) -> str:
+    if not _LEV:
+        raise RuntimeError("LLMFactory недоступен")
+    return await LLMFactory.execute_request(
+        prompt=prompt,
+        system=system,
+        model="gemini-3.1-flash-lite",
+        driver="gemini",
+        fallback=True,
+        task_type="structured",
+    )
 
 def _fmt_diet_card(d: dict, n: int) -> str:
     pros = "\n".join(f"  ✅ {p}" for p in d.get("pros", []))

@@ -1,8 +1,19 @@
 """\u041f\u0443\u0445\u043b\u044f\u0448 \u2014 \u043f\u0435\u0440\u0441\u043e\u043d\u0430\u0436 \u0438 \u0435\u0433\u043e \u0440\u0435\u0446\u0435\u043f\u0442\u044b \u0441 \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u043e\u043c."""
 import json
 import random
-import re
+import sys
 from datetime import datetime
+from building_blocks.logger import get_logger
+
+log = get_logger(__name__)
+
+sys.path.insert(0, "/opt/leviathan_engine")
+try:
+    from llm_factory import LLMFactory
+    _LEVIATHAN_CORE = True
+except ImportError:
+    _LEVIATHAN_CORE = False
+    log.warning("LLMFactory недоступен в puhlyash/persona.py")
 
 # \u0424\u0440\u0430\u0437\u044b \u043f\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438 \u0441\u0443\u0442\u043e\u043a
 TIME_VIBES = {
@@ -107,7 +118,6 @@ async def generate_puhlyash_recipe(profile: dict | None = None,
                                     diet_name: str | None = None,
                                     mood: str | None = None) -> dict:
     """Генерирует рецепт Пухляша — независимо от бюджета."""
-    import asyncio, json, re as _re, urllib.request
     from modules.recipes.engine import _parse
 
     month = datetime.now().month
@@ -127,30 +137,17 @@ async def generate_puhlyash_recipe(profile: dict | None = None,
         season = "лето" if is_summer else "осень" if month in (9,10,11) else "зима" if month in (12,1,2) else "весна"
         query = f"Вкусное блюдо на {season}. Простые ингредиенты, но с характером."
 
-    # Вызываем Gemini с промптом Пухляша (без profile)
-    env = open("/opt/leviathan_engine/agent_service/.env").read()
-    keys = _re.findall(r"GEMINI_K\d+=([^\s]+)", env)
-    random.shuffle(keys)
-    raw = None
-    for key in keys:
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-3.1-flash-lite:generateContent?key={key}")
-        body = json.dumps({
-            "system_instruction": {"parts": [{"text": SYS_PUHLYASH}]},
-            "contents": [{"role": "user", "parts": [{"text": query}]}],
-            "generationConfig": {"temperature": 0.9, "maxOutputTokens": 2048}
-        }).encode()
-        try:
-            req = urllib.request.Request(url, body, {"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=45) as r:
-                raw = json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-            break
-        except Exception as e:
-            if any(x in str(e) for x in ["403", "429", "503"]):
-                continue
-            raise
-    if raw is None:
-        raise RuntimeError("Gemini недоступен")
+    # LLMFactory (KeyPool + CircuitBreaker + Groq fallback) -- замена urllib
+    if not _LEVIATHAN_CORE:
+        raise RuntimeError("LLMFactory недоступен")
+    raw = await LLMFactory.execute_request(
+        prompt=query,
+        system=SYS_PUHLYASH,
+        model="gemini-3.1-flash-lite",
+        driver="gemini",
+        fallback=True,
+        task_type="structured",
+    )
 
     recipe = _parse(raw, "home")
     recipe["puhlyash_intro"] = get_puhlyash_intro(mood)
