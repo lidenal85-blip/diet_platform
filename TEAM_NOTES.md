@@ -26,7 +26,34 @@
 
 ---
 
-## ✅ CONFLICT-01 — ИСПРАВЛЕНО (2026-06-19) — Userbot Relay
+## ✅ CONFLICT-01 — ИСПРАВЛЕНО ОКОНЧАТЕЛЬНО (2026-06-30) — Ушли от Pyrogram вообще
+
+**История вопроса:** сначала был конфликт за Pyrogram session между diet_platform
+и den4ik-claude (см. историю ниже — Userbot Relay от 2026-06-19). 2026-06-30
+den4ik-claude мигрировал на новый файл `leviathan_hub_bot.py` («4 modes:
+AUTO/CORE/FORGE/HERALD»), который вообще не использует Pyrogram — Userbot
+Relay перестал отвечать (`/opt/den4ik-claude/userbot_relay.py` остался на
+диске, но никем не запускается).
+
+**Решение владельца:** Pyrogram/userbot больше не нужен вообще.
+`modules/notifier/sender.py` переписан повторно — теперь использует
+**собственный aiogram Bot** diet_platform (свой `TELEGRAM_BOT_TOKEN` из `.env`),
+никакой зависимости от den4ik-claude/Userbot Relay больше нет. Короткоживущий
+`Bot()`-инстанс на каждую отправку (стандартная практика aiogram для одиночных
+отправок из фоновых задач, не связанных с long-polling в bot.py).
+
+**Проверено:** `send_notification()` → `True`, реальное сообщение
+дошло в Telegram без участия den4ik-claude.
+
+**Не удалено намеренно:** `userbot_relay_token` в `config.py` и `USERBOT_RELAY_TOKEN`
+в `.env` оставлены на месте (безвредны, но уже нигде не используются) —
+быстрый rollback возможен, если понадобится.
+
+**Старая версия файла:** `modules/notifier/sender.py.bak` (httpx → Userbot Relay).
+
+---
+
+## 📜 ИСТОРИЯ: CONFLICT-01 — Userbot Relay (2026-06-19, устарело, см. выше)
 
 **Была проблема:** `diet_platform` и `/opt/den4ik-claude/` (оба проекта владельца,
 подтверждено) использовали один и тот же Pyrogram session-файл
@@ -178,8 +205,7 @@ bot_handlers/recipes.py переведён на LLMFactory). Остались `m
 - Pipeline: DuckDuckGo → httpx scraper → Gemini extractor → diet_registry
 - Очередь: SQLite Outbox (статус-поллинг каждые 3с)
 - LLM: Leviathan LLMFactory (14 ключей Gemini 2.5-flash, KeyPool + CircuitBreaker, fallback → Groq)
-- Notifications: Pyrogram userbot через **Userbot Relay** (живёт внутри den4ik-claude,
-  port 8190) — работает, см. CONFLICT-01
+- Notifications: собственный aiogram Bot (без Pyrogram/Userbot Relay, см. CONFLICT-01 — 2026-06-30)
 - Scheduler: APScheduler (timezone Moscow)
 
 Связанные проекты на этом же сервере:
@@ -214,6 +240,18 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 ---
 
 ## 📅 CHANGELOG
+
+### 2026-06-30 — Ушли от Pyrogram вообще (Claude / Leviathan Agent)
+- Обнаружено: den4ik-claude мигрировал на leviathan_hub_bot.py, который не использует
+  Pyrogram — Userbot Relay остался на диске, но никем не запускался. Уведомления падали
+  с connection refused.
+- Владелец решил: Pyrogram/userbot больше не нужен вообще — перевёл уведомления
+  на собственный aiogram Bot diet_platform.
+- `modules/notifier/sender.py` переписан второй раз (был httpx→Relay, стал
+  прямым aiogram Bot()). Сигнатура `send_notification()` не менялась — вызывающий
+  код не тронут.
+- Проверено реальной отправкой: True, сообщение дошло без участия den4ik-claude.
+- diet_platform теперь полностью независим от den4ik-claude для Telegram-функционала.
 
 ### 2026-06-21 — J1/J2/J3 фиксы + инцидент с den4ik-claude (Claude / Leviathan Agent)
 - **Инцидент:** при рутинной проверке обнаружен `den4ik-claude` в статусе `failed`
@@ -273,9 +311,9 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 7. **Bot token и API keys** — только в `.env` / константах рядом с остальными секретами
 8. **den4ik-claude и diet_platform — оба проекта владельца**, но разные по риску:
    den4ik-claude имеет `systemctl stop/start` над всеми сервисами — правь аккуратно
-9. **Pyrogram-сессия** (`/opt/telegram-agent-book/my_account.session`) — только у
-   den4ik-claude. Другим проектам нужен userbot — иди через Userbot Relay (127.0.0.1:8190),
-   не создавай второй Client на той же сессии
+9. **Pyrogram больше не используется в diet_platform** (2026-06-30). Уведомления идут
+   через собственный aiogram Bot (`modules/notifier/sender.py`). Не создавай
+   зависимость от den4ik-claude/Userbot Relay для отправки сообщений снова.
 10. **Маскот Пухляш** — саркастичный, но добрый. Ирисочка — мягкая и мудрая. Тон важен!
 11. **GitHub push** — токен всегда должен быть из-под аккаунта `lidenal85-blip`,
     не из других аккаунтов на этом сервере — у них только `pull`. Перед pushом

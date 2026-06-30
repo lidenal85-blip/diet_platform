@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_keys: str = ""  # comma-separated pool
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Telegram
     telegram_bot_token: str = ""

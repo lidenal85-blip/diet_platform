@@ -1,4 +1,4 @@
-"""Diet Extractor: ядро Leviathan LLMFactory (gemini-2.5-flash, KeyPool, CircuitBreaker) + fallback.
+"""Diet Extractor: ядро Leviathan LLMFactory (gemini-3.1-flash-lite, KeyPool, CircuitBreaker) + fallback.
 
 Подключён к /opt/leviathan_engine/llm_factory.py — использует KeyPool с 14 ключами,
 CircuitBreaker и авто-фоллбэк на Groq при исчерпании Gemini.
@@ -27,11 +27,11 @@ log = get_logger(__name__)
 cfg = get_settings()
 
 if _LEVIATHAN_CORE:
-    log.info("🔗 Leviathan LLMFactory (gemini-2.5-flash, KeyPool 14 ключей) подключён")
+    log.info("🔗 Leviathan LLMFactory (gemini-3.1-flash-lite, KeyPool 14 ключей) подключён")
 else:
     log.warning("⚠️ LLMFactory недоступен, fallback на google.genai")
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-flash-lite"
 
 EXTRACTION_SYSTEM = """\
 Ты — медицинский NLP-парсер диет и планов питания.

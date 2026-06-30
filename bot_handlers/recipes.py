@@ -30,7 +30,7 @@ async def _ask_llm(prompt: str, system: str) -> str:
     return await LLMFactory.execute_request(
         prompt=prompt,
         system=system,
-        model="gemini-2.5-flash",
+        model="gemini-3.1-flash-lite",
         driver="gemini",
         fallback=True,
         task_type="default",
