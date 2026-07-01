@@ -1,25 +1,32 @@
 
 # diet_platform - Claude Context
-**Generated:** 2026-06-30 10:16
+**Generated:** 2026-06-30 11:46
 
 
 
 
 ## Last Checkpoint
-**GROQ 401 в diet_platform: найден и исправлен реальный баг (не просто протухший ключ). _groq_pool() и _gemini_pool() в /opt/leviathan_engine/llm_factory.py абортировали весь retry-цикл после первого неудачного ключа вместо перехода к следующему в пуле. Цепочка: 1 из 14 Gemini-ключей (...1SIf9M) suspended → фоллбэк на Groq → 1 из 5 Groq-ключей дал тот же баг → полный отказ. Исправлено 3 патча: (1) core/key_pool.py — добавлен COOLDOWN_401_SEC=3600 и ветка elif code==401; (2) llm_factory.py _groq_pool — raise→warning+continue; (3) llm_factory.py _gemini_pool — та же замена. Синтаксис проверен py_compile. diet-platform.service перезапущен 2 раза (каждый ~90с из-за медленного SIGTERM), финально active/running, /health → 200, логи чистые без ошибок. Прямые тесты GROQ_K1..K5 — 5/5 валидны.**
-_2026-06-30T10:16 | claude_
+**Синхронизация после параллельной работы. Прочитан TEAM_NOTES.md — обнаружено что баг с Userbot Relay (который я нашёл и зарепортил в предыдущем ответе) уже закрыт параллельной сессией (коммит 5f607c5, мой f27ee9f лёг под ним в истории без конфликтов). Не поверил тексту чекпоинта на слово — живьм вызовом send_notification() подтвердил True за 0.54s. Проверил aiogram getUpdates конфликт у den4ik-claude — за 2 часа ни одного события, похоже исчез. Проверил bot token (8954955644, засвечён открытым текстом в чате) — всё ещё жив, не отозван сам, решение оставлено владельцу (downtime-risk операция). Начал было смотреть F2 (timezone) — подтверждён хардкод Europe/Moscow везде, но саму реализацию не начал — решил спросить приоритеты у Denis перед тем как уходить в бэклог без явного запроса (его сообщение было 'TEAM_NOTES / ctx restore / ctx start' — сигнал на синхронизацию, не на дальнейший разработки). Сервисы проверены active, живых изменений в git не вносилось (только .claude/claude.md локально изменён, не трогал).**
+_2026-06-30T11:46 | claude_
 
 
 Next steps:
-- [ ] Идентифицировать и при желании перевыпустить подозрительный Gemini-ключ (суффикс ...1SIf9M, 403 Consumer suspended) — не срочно, теперь корректно пропускается благодаря cooldown-фиксу
-- [ ] Проверить/перезапустить другие сервисы, использующие общий /opt/leviathan_engine/llm_factory.py, чтобы подхватить тот же фикс (не сделано в этой сессии, вне скопа)
-- [ ] Отдельно: diet-platform.service ~90с виснет в deactivating (stop-sigterm) при каждом рестарте — вероятно нет graceful shutdown для scheduler/aiogram polling/pipeline_worker. Не критично, но стоит починить если рестарты участятся.
-- [ ] Открытый бэклог из предыдущего чекпоинта (E1/I2/F2/G1-G2/A1-A3 и т.д.) остаётся открытым, эта сессия его не касалась
+- [ ] E1: передать weight_kg/health_notes/goal в fitness/engine.py промпт — приоритет безопасности
+- [ ] I2: запрет выдумывать детали в SYS_PUHLYASH/SYS_DIET
+- [ ] F2: timezone в user_profiles + per-user APScheduler — подтверждён хардкод Europe/Moscow, реализация не начата — ждёт приоритизации от Denis
+- [ ] Groq: обновить протухшие ключи GROQ_K1..K5 на console.groq.com — всё ещё не проверено ни в одной сессии
+- [ ] I1: modules/irisochka/persona.py по образцу puhlyash/persona.py — ЧАСТИЧНО СДЕЛАНО в modules/puhlyash/irisochka.py в этой сессии (коммит f27ee9f) — проверить пересекается ли с этим next_step или он устарел
+- [ ] RESOLVE: bot token 8954955644 засвечён в чате, жив и рабочий (проверено getMe) — решить ротацию с Denis, ротация = downtime для живых пользователей
+- [ ] CLOSED: aiogram getUpdates conflict у den4ik-claude — проверено, 2 часа без событий, похоже исчез с переходом на leviathan_hub_bot.py — можно убрать из next_steps
+- [ ] Убрать userbot_relay_token из config/.env если роллбэк точно не понадобится — без изменений
 
 
 
 
 ## Architectural Decisions
+
+**integration:** Userbot Relay и Pyrogram полностью убраны. modules/notifier/sender.py теперь использует собственный aiogram Bot() diet_platform (короткоживущий инстанс на каждую отправку). Никакой зависимости от den4ik-claude больше нет. userbot_relay_token оставлен в config для быстрого rollback, но не используется. Коммит 5f607c5.
+> Что делать после того как den4ik-claude мигрировал на leviathan_hub_bot.py и сломал Userbot Relay (Pyrogram больше не запущен)?
 
 **database:** aiosqlite.connect() всегда с timeout=30. Алиасы DB_PATH (_DB, db_path и др.) должны проверяться вручную: sed-фикс искал только литерал DB_PATH и пропустил алиас _DB.
 > Почему возникает database is locked?
