@@ -82,19 +82,18 @@ def _profile_text(p: dict) -> str:
         f"⏱ Время: {time_map.get(p.get('max_cook_time', 30), '')}\n"
         f"🚫 Исключения: {excl}\n"
         f"🍝 Рецепт дня: {rde}, {rdt}\n\n"
-        f"🌐 <a href='https://leviathanstory.ru/diet/cabinet'>Открыть в браузере</a>"
+        # WebApp-ссылка убрана: старый прод leviathanstory.ru мёртв (R2 в
+        # APP_ANALYSIS_REPORT.md), фронтенда на whimco пока нет — настройка
+        # полностью доступна в боте. Вернуть вместе с кнопкой в cmd_cabinet,
+        # когда появится публичный URL мини-аппа (bot.py: WEBAPP_BASE_URL).
     )
 
 
 @router.message(F.text.in_(["👤 Кабинет", "/cabinet"]))
 async def cmd_cabinet(message: Message, state: FSMContext):
     p = await _get_profile(str(message.from_user.id))
-    webapp_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="📱 Открыть кабинет",
-            web_app=WebAppInfo(url="https://leviathanstory.ru/diet/app")
-        )
-    ]])
+    # WebApp-кнопка отключена (R2 в APP_ANALYSIS_REPORT.md): мёртвый домен,
+    # фронта нет. Вернуть вместе с WEBAPP_BASE_URL в bot.py.
     tg_kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="✏️ Настроить через бот")],
         [KeyboardButton(text="🍝 Рецепт дня: вкл/выкл")],
@@ -103,7 +102,6 @@ async def cmd_cabinet(message: Message, state: FSMContext):
     await message.answer(
         _profile_text(p) if p else "👤 <b>Кабинет</b>\n\nПрофиль не заполнен.",
         parse_mode="HTML", reply_markup=tg_kb)
-    await message.answer("📱 Или открой в браузере:", reply_markup=webapp_kb)
 
 
 @router.message(F.text == "✏️ Настроить через бот")

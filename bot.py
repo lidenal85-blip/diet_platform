@@ -50,14 +50,23 @@ def _main_kb() -> ReplyKeyboardMarkup:
 
 # ── /start ───────────────────────────────────────────────
 
+# Базовый URL мини-аппа. Пока фронта нет — кнопки WebApp не выдаются (см. R2).
+# Когда появится публичный домен — раскомментировать кнопки в cmd_start/cmd_cabinet.
+WEBAPP_BASE_URL = ""  # например: "https://<PUBLIC-HOST>/diet"
+
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    webapp_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="📱 Открыть кабинет",
-            web_app=WebAppInfo(url=f"https://leviathanstory.ru/diet/app?uid={message.from_user.id}")
-        )
-    ]])
+    # WebApp-кабинет отключён (APP_ANALYSIS_REPORT.md R2): старый прод
+    # leviathanstory.ru мёртв, фронтенда мини-аппа на whimco пока нет.
+    # Настройки полностью покрыты /cabinet в боте.
+    # Вернуть: задать public base URL и раскомментировать:
+    # webapp_kb = InlineKeyboardMarkup(inline_keyboard=[[
+    #     InlineKeyboardButton(
+    #         text="📱 Открыть кабинет",
+    #         web_app=WebAppInfo(url=f"https://<PUBLIC-HOST>/diet/app?uid={message.from_user.id}")
+    #     )
+    # ]])
+    # await message.answer("📱 Настрой профиль в кабинете:", reply_markup=webapp_kb)
     await message.answer(
         "🍝 <b>Пухляш</b> — свой парень, накормит вкусно 😋\n\n"
         "🎯 <b>Что умею:</b>\n"
@@ -68,10 +77,6 @@ async def cmd_start(message: Message):
         "⬇️ Нажми что хочешь или настрой профиль:",
         parse_mode="HTML",
         reply_markup=_main_kb(),
-    )
-    await message.answer(
-        "📱 Настрой профиль в кабинете:",
-        reply_markup=webapp_kb
     )
 # ── /help ──────────────────────────────────────────────
 

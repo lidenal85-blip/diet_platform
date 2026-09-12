@@ -46,12 +46,62 @@ class Settings(BaseSettings):
     min_confidence_score: float = 0.15
     auto_publish_threshold: float = 0.75
 
+    # Vault (Secrets Vault integration)
+    vault_url: str = "http://127.0.0.1:8400"
+    vault_api_key: str = ""
+    vault_project_id: str = "diet_platform"
+    vault_enabled: bool = True  # загружать секреты из Vault
+
     class Config:
         env_file = "/opt/diet_platform/.env"
         env_file_encoding = "utf-8"
         extra = "ignore"
 
+    def load_vault_secrets(self) -> dict[str, str]:
+        """Загрузить секреты из Vault и вернуть как dict."""
+        if not self.vault_enabled:
+            return {}
+        try:
+            from building_blocks.vault_integration import VaultSecretLoader
+            vault = VaultSecretLoader(
+                vault_url=self.vault_url,
+                project_id=self.vault_project_id,
+                api_key=self.vault_api_key or None,
+            )
+            secrets = vault.load_all()
+            vault.close()
+            return secrets
+        except Exception as e:
+            import logging
+            logging.getLogger("diet_platform.config").warning(
+                "Vault secrets load failed: %s", e
+            )
+            return {}
+
+    def apply_vault_overrides(self):
+        """Перезаписать поля из Vault (vault-значения приоритетнее .env)."""
+        vault_secrets = self.load_vault_secrets()
+        if not vault_secrets:
+            return
+        for key, val in vault_secrets.items():
+            # Маппинг env-имён в snake_case поля Settings
+            field_map = {
+                "GEMINI_API_KEY": "gemini_api_key",
+                "GEMINI_KEYS": "gemini_keys",
+                "GEMINI_MODEL": "gemini_model",
+                "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
+                "USERBOT_RELAY_TOKEN": "userbot_relay_token",
+                "SERPAPI_KEY": "serpapi_key",
+                "DATABASE_PATH": "database_path",
+                "VAULT_API_KEY": "vault_api_key",
+            }
+            field = field_map.get(key, key.lower())
+            if hasattr(self, field) and val:
+                setattr(self, field, val)
+
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    s.apply_vault_overrides()  # vault перезаписывает .env
+    return s

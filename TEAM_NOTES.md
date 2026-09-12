@@ -241,6 +241,32 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 
 ## 📅 CHANGELOG
 
+### 2026-09-12 — FIX: критические находки из APP_ANALYSIS_REPORT.md (R2/R4/requirements.txt) (Buffy / Freebuff)
+- **Создан `APP_ANALYSIS_REPORT.md`** — полный анализ приложения: 5 системных разрывов, риски R1-R10, дорожная карта фаз 0-4.
+- **R2 закрыт:** мёртвые WebApp-ссылки на `leviathanstory.ru` убраны из `bot.py` (/start) и `bot_handlers/cabinet.py` (кнопка + ссылка в тексте профиля). Возврат — через `WEBAPP_BASE_URL` в `bot.py`, когда появится публичный домен мини-аппа. Регрессия — шаг 1b в `tests/e2e_diet_picker.py` (проверяет отсутствие ссылки и рендер кабинета).
+- **R4 закрыт:** API переведён на `127.0.0.1:8150` (`APP_HOST=127.0.0.1` в .env whimco). **ВАЖНО: ufw на whimco НЕ включать** — сервер мультиарендный (nginx, x-ui :443/:2053/:2096, GapirAI, PM OS, PrintCalc и др. слушают 0.0.0.0); общий фаервол их порвёт. Точечная привязка к loopback — безопасная альтернатива: внешних потребителей :8150 нет (nginx не проксирует, бот — исходящий long-polling, health проверяется с localhost).
+- **`requirements.txt` создан** (пины = прод-venv whimco: aiogram 3.31.0, fastapi 0.141.1, uvicorn 0.52.4, pydantic 2.13.5 и т.д.) — README снова валиден, установка воспроизводима.
+- **`tests/e2e_diet_picker.py` сохранён как перманентный харнесс** (флаги `--fast/--keep-db/--user-id`). Фиксы под aiogram 3.31: `FakeSession.make_request(bot, method, timeout=...)`, абстрактный `close()`, `global` до использования. Прогон `--fast` на whimco: 10 шагов PASS.
+- Деплой: бэкапы `bot.py.bak_r2` / `bot_handlers/cabinet.py.bak_r2`, pycache clean, рестарт (долгий SIGTERM — известная особенность, процесс поднялся сам), health `{"status":"ok"}` на `127.0.0.1:8150`, `ss` подтверждает `LISTEN 127.0.0.1:8150`, 0 ошибок в логе.
+- Не закоммичено в git (CON-69): `bot.py`, `bot_handlers/cabinet.py`, `requirements.txt`, `tests/e2e_diet_picker.py`, `APP_ANALYSIS_REPORT.md`, `TEAM_NOTES.md`.
+
+### 2026-09-11 (позже) — FIX: «name '_get_3_diets' is not defined» (Buffy / Freebuff)
+- **Баг:** флоу «🎯 Подобрать диету» падал с `❌ Ошибка: name '_get_3_diets' is not defined` (и то же для `_get_week_plan` на шаге выбора). Причина: `bot_handlers/diet_picker.py` вызывал `_get_3_diets()`/`_get_week_plan()` из `do_pick`/`chose_diet`, но функции НИКОГДА не были определены (ни в файле, ни в импортах) — коммит 5a6a00c ушёл в прод с мёртвыми вызовами; broad `except` превращал NameError в юзер-фейс. Латентый баг старого прода — не привнесён миграцией на whimco.
+- **Фикс (аддитивный):** реализованы `_get_3_diets()` (LLM → JSON-массив 3 диет по схеме карточки) и `_get_week_plan()` (LLM → JSON на 7 дней + shopping_list + tips) + `_extract_json()` (терпимость к ```-fence/мусору вокруг JSON) + эвристические фоллбэки `_heuristic_diets()` (по цели: похудеть/набрать/прочее) и `_heuristic_week_plan()` — при сбое LLM/таймауте пользователь получает рабочий результат, а не ошибку. Промпты без фигурных скобок внутри текста (правило BUG-02), ключи верхнего уровня строго латиницей (days/shopping_list/tips), guard: <5 дней в ответе LLM → фоллбэк.
+- Проверено локально (моки): extract/fence/мусор, все ветки эвристик, LLM-ok/LLM-мусор/LLM-off, обрезанный ответ → ALL_TESTS_PASS. На whimco живой смоук: 3 реальных диеты от Gemini + план 7 дней (8 позиций списка покупок, 3 совета), оба formatter'а рендерят.
+- Задеплоено на whimco (diet-platform перезапущен, health OK), бэкап: `diet_picker.py.bak_before_3diets_fix`. Локальная копия `projects_17/diet_platform/bot_handlers/diet_picker.py` обновлена, НЕ закоммичена — закоммитить в базу (CON-69).
+- **E2E через реального бота (2026-09-11):** прогнан весь флоу «🎯 Подобрать диету» через реальный aiogram Dispatcher (те же 8 роутеров, что в start_bot): 7 шагов FSM — опросник → 3 карточки от Gemini → выбор → недельный план. PASS за 7.0s. Перехвачены только исходящие Telegram-вызовы (FakeSession на bot.session) — реальным пользователям ничего не ушло; FSM/БД/LLM реальные (БД — временная копия). Попутно отполировано: `snack` от LLM приходит и объектом (как приёмы) — форматтер теперь рендерит «название (ккал ккал)» вместо сырого dict; в промпт плана добавлено «всё строго на русском» (Gemini отдавал Monday/Tuesday). Юнит-тест форматтера: dict-snack + string-snack — OK.
+
+### 2026-09-11 — РЕДЕПЛОЙ на whimco (Buffy / Freebuff)
+- Старый прод-сервер leviathanstory.ru (78.17.24.96) недоступен: SSH открыт, но ни один из 8 локальных ключей не авторизуется; getUpdates бота пуст — старый инстанс не работает и не конфликтует.
+- Развернуто на whimco (185.233.184.192, ADR-022 server-first): `/opt/diet_platform` (код = git HEAD 15c35be, сверено diff со старым прод-снапшотом `~/leviathan/opt/diet_platform` — идентично) + минимальный `/opt/leviathan_engine` (llm_factory.py, key_classifier.py, core/) из того же снапшота.
+- venv: `/opt/diet_platform/venv` (aiogram 3.31.0, fastapi, aiosqlite, apscheduler, bs4, httpx, pydantic v2, uvicorn).
+- systemd: `diet-platform.service` (восстановлен из старого unit'а, ExecStart переведен на venv-python), порт 8150, лог `/opt/diet_platform/logs/diet_platform.log`.
+- Проч БД перенесена из снапшота (458752 байт, идентична локальной копии). Vault-интеграция выключена (`VAULT_ENABLED=false`) — на whimco secrets-vault нет, config корректно падает в .env.
+- Ключи: старый пул Gemini (GEMINI_K1..K6 в agent_service/.env) МЕРТВ (403/400) — заменен на 3 живых ключа из `.keys/gemini_active.keys`; Groq-ключи живы (6/6 на /v1/models). ВАЖНО: ключи `AIzaSy*` из старого .env diet_platform тоже мертвы.
+- Проверено: health 200, LLM-смоук через LLMFactory вернул реальный ответ Gemini (gemini-3.1-flash-lite), KeyPool 3+3 ключа (Redis нет — локальный режим), Telegram conflict 0 за время наблюдения.
+- Секреты из /tmp на whimco удалены; локальные временные файлы деплоя удалены.
+
 ### 2026-06-30 — Ушли от Pyrogram вообще (Claude / Leviathan Agent)
 - Обнаружено: den4ik-claude мигрировал на leviathan_hub_bot.py, который не использует
   Pyrogram — Userbot Relay остался на диске, но никем не запускался. Уведомления падали

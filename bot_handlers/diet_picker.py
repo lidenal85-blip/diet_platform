@@ -1,5 +1,5 @@
 """Bot handler: Подбор диеты — опросник + Gemini рекомендации."""
-import json, sys
+import asyncio, json, sys
 import aiosqlite
 sys.path.insert(0, "/opt/leviathan_engine")
 try:
@@ -83,6 +83,164 @@ def _fmt_diet_card(d: dict, n: int) -> str:
     )
 
 
+# ── Генерация diet-объектов (функции, вызывавшиеся из хендлеров, но не существовавшие) ──
+
+def _extract_json(raw: str):
+    """Достать JSON из ответа LLM: терпимо к ```-fence, префиксу и мусору вокруг."""
+    if not raw:
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    text = text.strip()
+    start = text.find("[")
+    alt = text.find("{")
+    if alt != -1 and (start == -1 or alt < start):
+        start = alt
+    if start == -1:
+        return None
+    end = max(text.rfind("]"), text.rfind("}"))
+    if end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except (ValueError, TypeError):
+        return None
+
+
+DIET_JSON_RULE = (
+    "Верни строго JSON-массив из 3 объектов, без текста вне JSON. "
+    "Никаких фигурных скобок в тексте полей. Схема каждого объекта: "
+    "name, tagline, calories_range, duration_weeks, difficulty, "
+    "pros (массив 3 строк), cons (массив 2 строк), key_foods (массив 5-7 строк)."
+)
+
+
+def _heuristic_diets(data: dict) -> list:
+    """Фоллбэк без LLM: 3 безопасных варианта по цели (CircuitBreaker/лимиты API)."""
+    goal = str(data.get("goal", ""))
+    if "Похудеть" in goal:
+        base = [
+            dict(name="Умеренный дефицит", tagline="Спокойное снижение веса без голода",
+                 calories_range="1600–1900 ккал", duration_weeks=8, difficulty="лёгкая",
+                 pros=["Нет жёстких ограничений", "Сохраняет мышцы", "Устойчивый результат"],
+                 cons=["Медленный темп", "Нужен подсчёт калорий"],
+                 key_foods=["курица", "рыба", "творог", "овощи", "гречка", "яйца"]),
+            dict(name="Низкоуглеводная лёгкая", tagline="Меньше быстрых углеводов — меньше скачков аппетита",
+                 calories_range="1500–1800 ккал", duration_weeks=6, difficulty="средняя",
+                 pros=["Быстрое насыщение", "Минимум сладкого"],
+                 cons=["Первая неделя — адаптация", "Может быть слабость"],
+                 key_foods=["яйца", "мясо", "авокадо", "сыр", "зелень", "орехи"]),
+            dict(name="Овощной дефицит", tagline="Больше объёма еды за те же калории",
+                 calories_range="1500–1800 ккал", duration_weeks=6, difficulty="лёгкая",
+                 pros=["Много еды по объёму", "Много клетчатки"],
+                 cons=["Нужна готовка", "Не всем подходит по ЖКТ"],
+                 key_foods=["овощи", "капуста", "кабачки", "грибы", "зелень", "индейка"]),
+        ]
+    elif "Набрать" in goal:
+        base = [
+            dict(name="Профицит + белок", tagline="Классический набор массы без жирового привеса",
+                 calories_range="2600–3000 ккал", duration_weeks=10, difficulty="средняя",
+                 pros=["Простой расчёт", "Хорошо сочетается с тренировками"],
+                 cons=["Нужно есть по расписанию", "Дорого по продуктам"],
+                 key_foods=["говядина", "рис", "творог", "орехи", "бананы", "яйца"]),
+            dict(name="Углеводное окно", tagline="Углеводы вокруг тренировок",
+                 calories_range="2700–3100 ккал", duration_weeks=10, difficulty="средняя",
+                 pros=["Энергия на тренировки", "Быстрое восстановление"],
+                 cons=["Привязка к расписанию", "Не для малоподвижных"],
+                 key_foods=["рис", "макароны", "картофель", "курица", "хлеб", "мёд"]),
+            dict(name="Молочный набор", tagline="Максимум калорий из жидких и молочных продуктов",
+                 calories_range="2800–3200 ккал", duration_weeks=8, difficulty="лёгкая",
+                 pros=["Готовится быстро", "Удобно пить в дороге"],
+                 cons=["Не подходит при непереносимости лактозы", "Приедается"],
+                 key_foods=["молоко", "творог", "сметана", "кефир", "овсянка", "арахисовая паста"]),
+        ]
+    else:
+        base = [
+            dict(name="Сбалансированная тарелка", tagline="БЖУ 30-30-40 без фанатизма",
+                 calories_range="1900–2300 ккал", duration_weeks=8, difficulty="лёгкая",
+                 pros=["Ничего не запрещено", "Легко держаться долго"],
+                 cons=["Медленная динамика", "Нужен базовый контроль порций"],
+                 key_foods=["крупы", "рыба", "овощи", "фрукты", "мясо", "молочные"]),
+            dict(name="Средиземноморская", tagline="Золотой стандарт здорового питания",
+                 calories_range="1900–2300 ккал", duration_weeks=12, difficulty="лёгкая",
+                 pros=["Максимум научных данных", "Разнообразная еда"],
+                 cons=["Рыба может быть дорогой", "Нужно привыкнуть к оливковому маслу"],
+                 key_foods=["рыба", "оливковое масло", "овощи", "орехи", "бобовые", "цельнозерновой хлеб"]),
+            dict(name="Рацион 16+8", tagline="Интервальное питание без подсчёта калорий",
+                 calories_range="1900–2200 ккал", duration_weeks=8, difficulty="средняя",
+                 pros=["Не надо считать ккал", "Простое правило"],
+                 cons=["Нельзя при гастрите/диабете без врача", "Голод вечером в начале"],
+                 key_foods=["яйца", "мясо", "крупы", "овощи", "супы", "йогурт"]),
+        ]
+    return base
+
+
+async def _get_3_diets(data: dict) -> list:
+    """3 варианта диеты по профилю. LLM → при сбое эвристика (пользователь не видит ошибку)."""
+    goal = str(data.get("goal", ""))
+    age = data.get("age", "")
+    restrictions = str(data.get("restrictions", ""))
+    activity = str(data.get("activity", ""))
+    restrictions_note = f" Учитывай ограничения: {restrictions}." if restrictions and "Нет ограничений" not in restrictions else ""
+    prompt = (
+        f"Подбери 3 варианта диеты. Цель: {goal}. Возраст: {age}. "
+        f"Активность: {activity}.{restrictions_note} " + DIET_JSON_RULE
+    )
+    if _LEV:
+        try:
+            raw = await asyncio.wait_for(_gemini(prompt), timeout=45)
+            parsed = _extract_json(raw)
+            if isinstance(parsed, list) and len(parsed) >= 3 and all(isinstance(d, dict) and d.get("name") for d in parsed[:3]):
+                return parsed[:3]
+        except Exception as e:
+            log.warning("diet picker: LLM недоступен, эвристика ( %s )", e)
+    return _heuristic_diets(data)
+
+
+def _heuristic_week_plan(diet_name: str, data: dict) -> dict:
+    """Фоллбэк-план недели без LLM: базовые приёмы на каждый день."""
+    days = []
+    for day in ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]:
+        days.append(dict(
+            day=day,
+            breakfast=dict(название="Овсянка с фруктами и орехами", ккал="400"),
+            lunch=dict(название="Куриная грудка с гречкой и овощами", ккал="600"),
+            dinner=dict(название="Творог с зеленью и овощной салат", ккал="350"),
+            snack="Яблоко и горсть орехов",
+        ))
+    return dict(
+        days=days,
+        shopping_list=["овсянка 1 кг", "фрукты 2 кг", "куриная грудка 2 кг", "гречка 1 кг",
+                       "овощи 3 кг", "творог 1.5 кг", "зелень", "орехи 300 г", "яблоки 1 кг"],
+        tips=["Пей 1.5–2 литра воды в день.", "Последний приём пищи — за 2–3 часа до сна.",
+              f"Диета «{diet_name}» — это ориентир: слушай свой организм."],
+    )
+
+
+async def _get_week_plan(diet_name: str, data: dict) -> dict:
+    """План питания на неделю для выбранной диеты. LLM → при сбое эвристика."""
+    prompt = (
+        f"Составь план питания на 7 дней для диеты: {diet_name}. Все тексты строго на русском языке (и названия дней недели тоже). "
+        "Верни строго JSON без текста вне JSON и без фигурных скобок внутри текста полей. "
+        "Ключи верхнего уровня строго латиницей: days, shopping_list, tips. "
+        "days — массив из 7 объектов с ключами day, breakfast, lunch, dinner (опционально snack); "
+        "каждый приём — объект с ключами название и ккал. "
+        "shopping_list — массив строк, tips — массив 2-3 строк."
+    )
+    if _LEV:
+        try:
+            raw = await asyncio.wait_for(_gemini(prompt), timeout=45)
+            parsed = _extract_json(raw)
+            if isinstance(parsed, dict) and isinstance(parsed.get("days"), list) and len(parsed["days"]) >= 5:
+                return parsed
+        except Exception as e:
+            log.warning("week plan: LLM недоступен, эвристика ( %s )", e)
+    return _heuristic_week_plan(diet_name, data)
+
+
 def _fmt_week_plan(plan: dict, diet_name: str) -> str:
     lines = [f"📅 <b>План на неделю — {diet_name}</b>\n"]
     for day in plan.get("days", []):
@@ -94,7 +252,12 @@ def _fmt_week_plan(plan: dict, diet_name: str) -> str:
         lines.append(f"  🍽 {l.get('название', l) if isinstance(l, dict) else l} ({l.get('ккал', '?') if isinstance(l, dict) else '?'} ккал)")
         lines.append(f"  🌙 {d.get('название', d) if isinstance(d, dict) else d} ({d.get('ккал', '?') if isinstance(d, dict) else '?'} ккал)")
         if day.get("snack"):
-            lines.append(f"  🍎 Перекус: {day['snack']}")
+            snack = day["snack"]
+            if isinstance(snack, dict):
+                sname = snack.get("название") or snack.get("name") or ""
+                kcal = snack.get("ккал") or snack.get("kcal") or "?"
+                snack = f"{sname} ({kcal} ккал)" if sname else str(snack)
+            lines.append(f"  🍎 Перекус: {snack}")
         lines.append("")
     shop = plan.get("shopping_list", [])
     if shop:
