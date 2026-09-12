@@ -3,6 +3,10 @@ __pycache__/
 *.pyo
 .env
 *.db
+*.db-shm
+*.db-wal
+*.zip
+PROJECT_DUMP.md
 logs/
 *.log
 .DS_Store
