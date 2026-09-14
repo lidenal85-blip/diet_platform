@@ -17,12 +17,15 @@ MEAL_LABEL = {"breakfast": "Завтрак", "lunch": "Обед", "dinner": "У�
 
 
 async def _get_active_users() -> list[dict]:
+    from planner.context import FITNESS_CONTEXT_FIELDS
     async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT tg_id, meal_breakfast, meal_lunch, meal_dinner, "
-            "active_diet_mode, notifications_enabled FROM user_profiles "
-            "WHERE notifications_enabled=1"
+            "active_diet_mode, notifications_enabled, "
+            # FITNESS_CONTEXT_FIELDS: allowlist без дублирования списка колонок (PATCH-6)
+            + ", ".join(FITNESS_CONTEXT_FIELDS) +
+            " FROM user_profiles WHERE notifications_enabled=1"
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -42,9 +45,11 @@ async def send_meal_notification(meal: str):
         diet_mode = user.get("active_diet_mode") or "home"
         try:
             from modules.puhlyash.persona import generate_puhlyash_recipe, format_puhlyash_message
+            # PATCH-6: fitness-контекст = allowlist-колонки, уже выбранные в _get_active_users
+            fit_ctx = {k: user[k] for k in ("activity", "goal") if user.get(k) is not None}
             recipe, exercises = await asyncio.gather(
                 generate_puhlyash_recipe(profile=dict(user)),
-                generate_exercises(meal, diet_mode),
+                generate_exercises(meal, diet_mode, context=fit_ctx),
             )
             emoji = MEAL_EMOJI[meal]
             text = (

@@ -309,17 +309,16 @@ async def btn_puhlyash_recipe(message: Message, state: FSMContext):
     import asyncio
     import aiosqlite
     from database import DB_PATH
+    import planner
     from modules.puhlyash.persona import generate_puhlyash_recipe, format_puhlyash_message
     msg = await message.answer("🍝 Пухляш думает...", reply_markup=main_kb())
     try:
         tg_id = str(message.from_user.id)
         profile = {}
         async with aiosqlite.connect(DB_PATH, timeout=30) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM user_profiles WHERE tg_id=?", (tg_id,)) as c:
-                row = await c.fetchone()
-            if row:
-                profile = dict(row)
+            # PATCH-6 allowlist: only recipe-relevant fields leave the profile
+            # (health_notes и прочие служебные колонки наружу не идут).
+            profile = await planner.build_recipe_context(db, tg_id)
         recipe = await asyncio.wait_for(
             generate_puhlyash_recipe(profile=profile), timeout=45
         )

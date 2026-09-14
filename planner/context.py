@@ -41,7 +41,9 @@ FITNESS_CONTEXT_FIELDS = ("activity", "goal")
 
 async def _fetch_profile(db: aiosqlite.Connection, tg_id: str) -> dict:
     """Один SELECT * — далее allowlist-отбор (нет SELECT с перечислением колонок,
-    которых может не быть на старых БД; лишние поля никогда не читаются)."""
+    которых может не быть на старых БД; лишние поля никогда не читаются).
+    row_factory выставляется явно — модуль не зависит от настроек чужого соединения."""
+    db.row_factory = aiosqlite.Row
     cur = await db.execute(
         "SELECT * FROM user_profiles WHERE tg_id=?", (str(tg_id),)
     )

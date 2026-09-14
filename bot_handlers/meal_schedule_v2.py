@@ -264,8 +264,14 @@ async def _schedule_meal(tg_id: str, meal_name: str, time_str: str):
             prof = dict(prof)
             if not prof.get("notify_personal", 1) or not prof.get("notify_meals", 1): return
             recipe = await generate_puhlyash_recipe(profile=prof)
+            import planner
             from modules.fitness.engine import generate_exercises, format_exercises
-            exercises = await generate_exercises("lunch", prof.get("active_diet_mode") or "home")
+            async with aiosqlite.connect(_DB, timeout=30) as db:
+                # PATCH-6 allowlist: fitness sees only activity/goal
+                fit_ctx = await planner.build_fitness_context(db, uid)
+            exercises = await generate_exercises(
+                "lunch", prof.get("active_diet_mode") or "home", context=fit_ctx
+            )
             text = (
                 f"⏰ <b>{name}!</b>\n\n"
                 f"{format_puhlyash_message(recipe)}\n\n"

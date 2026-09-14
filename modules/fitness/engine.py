@@ -61,10 +61,21 @@ def _parse(raw: str) -> list:
     return json.loads(raw)
 
 
-async def generate_exercises(meal: str, diet_mode: str = "home") -> list:
+async def generate_exercises(meal: str, diet_mode: str = "home", context: dict | None = None) -> list:
+    """`context` — allowlist-контекст от planner.build_fitness_context()
+    (PATCH-6): только activity/goal; пустые и посторонние ключи отбрасываются.
+    """
     ctx = MEAL_CONTEXT.get(meal, "лёгкая разминка")
     hint = DIET_HINTS.get(diet_mode, "")
     prompt = f"Контекст: {ctx}. Диета: {hint}. Без инвентаря, без снарядов."
+    if context:
+        allowed = ("activity", "goal")
+        parts = [
+            f"{k}: {v}" for k in allowed
+            if (v := context.get(k)) is not None and str(v).strip()
+        ]
+        if parts:
+            prompt += " Профиль: " + ", ".join(parts) + "."
     raw = await _gemini(prompt)
     return _parse(raw)
 
