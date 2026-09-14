@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from building_blocks.logger import get_logger
 from database import DB_PATH
+import planner
 
 log = get_logger(__name__)
 router = Router()
@@ -346,13 +347,17 @@ async def got_activity(message: Message, state: FSMContext):
     await state.update_data(activity=message.text)
     await state.set_state(PickerStates.confirm)
 
-    # Сохраняем профиль в БД
+    # Сохраняем профиль в БД (§10 single-writer: ЕДИНСТВЕННЫЙ upsert профиля;
+    # §20-3: restrictions/activity теперь тоже сохраняются, а не живут только в FSM)
     tg_id = str(message.from_user.id)
     async with aiosqlite.connect(DB_PATH, timeout=30) as db:
         await db.execute(
-            "INSERT INTO user_profiles (tg_id, goal, age, onboarding_done) VALUES (?,?,?,1) "
-            "ON CONFLICT(tg_id) DO UPDATE SET goal=excluded.goal, age=excluded.age, onboarding_done=1",
-            (tg_id, data.get("goal", ""), data.get("age", 0))
+            "INSERT INTO user_profiles (tg_id, goal, age, restrictions, activity, onboarding_done) "
+            "VALUES (?,?,?,?,?,1) "
+            "ON CONFLICT(tg_id) DO UPDATE SET goal=excluded.goal, age=excluded.age, "
+            "restrictions=excluded.restrictions, activity=excluded.activity, onboarding_done=1",
+            (tg_id, data.get("goal", ""), data.get("age", 0),
+             data.get("restrictions", ""), data.get("activity", ""))
         )
         await db.commit()
 
@@ -441,6 +446,33 @@ async def chose_diet(message: Message, state: FSMContext):
         import asyncio
         plan = await asyncio.wait_for(_get_week_plan(diet_name, data), timeout=60)
         text = _fmt_week_plan(plan, diet_name)
+
+        # §20-3 / PATCH-5: LLM вне транзакции — здесь план уже сгенерирован и
+        # показывается пользователю; атомарная запись program+plan+meal_state+
+        # events (PATCH-4: meal_state только по фактическим слотам).
+        try:
+            async with aiosqlite.connect(DB_PATH, timeout=30) as db:
+                db.row_factory = aiosqlite.Row
+                await planner.persist_plan_bundle(
+                    db,
+                    tg_id=tg_id,
+                    diet_name=diet_name,
+                    source="diet_picker",
+                    card=chosen,
+                    constraints={
+                        "goal": data.get("goal", ""),
+                        "age": data.get("age", 0),
+                        "restrictions": data.get("restrictions", ""),
+                        "activity": data.get("activity", ""),
+                    },
+                    days=plan.get("days", []),
+                    shopping_list=plan.get("shopping_list") or [],
+                    tips=plan.get("tips") or [],
+                )
+        except planner.SlotsError as e:
+            # план пользователю уже отправлен; запись в домен — громкий отказ в лог
+            log.error("plan bundle persist failed: %s", e)
+
         await msg.delete()
         # Длинный текст бьём частями
         for chunk in [text[i:i+3800] for i in range(0, len(text), 3800)]:
