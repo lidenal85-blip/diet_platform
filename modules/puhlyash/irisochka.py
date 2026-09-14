@@ -9,10 +9,19 @@
 """
 import json
 import random
-import re
+import sys
 import logging
 
 log = logging.getLogger(__name__)
+
+sys.path.insert(0, "/opt/leviathan_engine")
+try:
+    from llm_factory import LLMFactory
+    _LEVIATHAN_CORE = True
+    log.info("🔗 Leviathan LLMFactory подключён в puhlyash/irisochka.py")
+except ImportError:
+    _LEVIATHAN_CORE = False
+    log.warning("⚠️ LLMFactory недоступен в puhlyash/irisochka.py — советы Ирисочки требуют LLM")
 
 SYS_IRISOCHKA = """Ты Ирисочка — маленькая серая мышка в белом поварском колпаке, помощник Пухляша и нутрициолог.
 Твой характер:
@@ -39,34 +48,24 @@ def get_quick_tip() -> str:
     return random.choice(_QUICK_FACTS)
 
 
-def _gemini(prompt: str) -> str:
-    import urllib.request
-    env = open("/opt/leviathan_engine/agent_service/.env").read()
-    keys = re.findall(r'GEMINI_K\d+=([^\s]+)', env)
-    random.shuffle(keys)
-    for key in keys:
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-3.1-flash-lite:generateContent?key={key}")
-        body = json.dumps({
-            "system_instruction": {"parts": [{"text": SYS_IRISOCHKA}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.6, "maxOutputTokens": 200}
-        }).encode()
-        try:
-            req = urllib.request.Request(
-                url, body, {"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            if any(x in str(e) for x in ["403", "429", "503"]):
-                continue
-            raise
-    return get_quick_tip()  # fallback если все ключи заняты
+async def _gemini(prompt: str) -> str:
+    """LLM-вызов через Leviathan LLMFactory (KeyPool + CircuitBreaker + Groq fallback)
+    вместо raw urllib и ручной ротации ключей из чужого env-файла.
+    """
+    if not _LEVIATHAN_CORE:
+        raise RuntimeError("LLMFactory недоступен")
+    return await LLMFactory.execute_request(
+        prompt=prompt,
+        system=SYS_IRISOCHKA,
+        model="gemini-3.1-flash-lite",
+        driver="gemini",
+        fallback=True,
+        task_type="structured",
+    )
 
 
 async def comment_recipe(recipe: dict) -> str:
     """Ирисочка комментирует рецепт Gemini."""
-    import asyncio
     title = recipe.get("title", "?")
     kcal = recipe.get("calories_per_serving", "?")
     p = recipe.get("protein_g", "?")
@@ -83,11 +82,10 @@ async def comment_recipe(recipe: dict) -> str:
         f"Ингредиенты: {', '.join(ingr)}. "
         f"Дай короткий нутриционный комментарий и 1 совет по улучшению."
     )
-    return await asyncio.get_running_loop().run_in_executor(None, _gemini, prompt)
+    return await _gemini(prompt)
 
 
 async def advise_diet(goal: str, restrictions: str = "") -> str:
     """Ирисочка даёт совет по диете."""
-    import asyncio
     prompt = f"Цель: {goal}. Ограничения: {restrictions or 'нет'}. Какой один важный нюанс должен знать человек?"
-    return await asyncio.get_running_loop().run_in_executor(None, _gemini, prompt)
+    return await _gemini(prompt)
