@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     vault_project_id: str = "diet_platform"
     vault_enabled: bool = True  # загружать секреты из Vault
 
+    # Mini App (§20 step 6, owner decision Phase 0)
+    # По умолчанию ВЫКЛЮЧЕН: роуты /diet/app* неаутентифицированы (нет initData
+    # validation). Повторное включение = отдельная задача + этот флаг.
+    miniapp_enabled: bool = False
+
     class Config:
         env_file = "/opt/diet_platform/.env"
         env_file_encoding = "utf-8"

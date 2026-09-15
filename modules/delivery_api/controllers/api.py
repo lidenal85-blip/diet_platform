@@ -224,6 +224,12 @@ async def delete_dlq_item(dlq_id: str):
 from api.cabinet_router import router as cabinet_router  # noqa
 app.include_router(cabinet_router)
 
-# Mini App
-from api.miniapp_router import router as miniapp_router  # noqa
-app.include_router(miniapp_router)
+# Mini App (§20 step 6, owner decision Phase 0): DISABLED by default —
+# роуты /diet/app* неаутентифицированы (нет initData validation).
+# Повторное включение: initData validation (отдельная задача) + MINIAPP_ENABLED=true.
+if cfg.miniapp_enabled:
+    from api.miniapp_router import router as miniapp_router  # noqa
+
+    app.include_router(miniapp_router)
+else:
+    log.info("🚫 Mini App routes disabled (miniapp_enabled=false, Phase 0)")
