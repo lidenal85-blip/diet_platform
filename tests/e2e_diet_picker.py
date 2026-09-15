@@ -22,17 +22,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
 
-PROJECT = "/opt/diet_platform"
+# Корень проекта: /opt на сервере; можно переопределить для локальных прогонов:
+#    E2E_PROJECT_ROOT=. python3 tests/e2e_diet_picker.py --fast
+PROJECT = os.environ.get("E2E_PROJECT_ROOT", "/opt/diet_platform")
 
 # ── Порядок имеет значение: env до импортов проекта ──────────────────────────
 # config.py читает env_file=/opt/diet_platform/.env и/или process env.
@@ -74,6 +77,8 @@ def _copy_prod_db(tmp_db: str) -> None:
     global TEST_USER_ID
     if not os.path.exists(PROD_DB):
         print(f"⚠️  Прод-БД не найдена: {PROD_DB} — создаём пустую (схему поднимут модули)")
+        sqlite3.connect(tmp_db).close()  # пустая заготовка (каталога /opt локально нет)
+        return
     src = sqlite3.connect(PROD_DB)
     dst = sqlite3.connect(tmp_db)
     with dst:
@@ -100,6 +105,8 @@ import database  # noqa: E402
 assert database.DB_PATH == os.environ["DATABASE_PATH"], (
     f"DB isolation broken: {database.DB_PATH}"
 )
+import aiosqlite  # noqa: E402
+import planner  # noqa: E402
 
 from aiogram import Bot, Dispatcher  # noqa: E402
 from aiogram.client.session.base import BaseSession  # noqa: E402
@@ -275,6 +282,74 @@ async def run_flow(dp: Dispatcher, bot: Bot) -> bool:
     no_error = "❌ Ошибка" not in all_text
     step("нет ❌ Ошибка в исходящих", no_error,
          "" if no_error else all_text[all_text.find("❌ Ошибка"):][:200])
+
+    # §20-8: инварианты домена после полного флоу (PATCH-1/2/4, canonical chain)
+    try:
+        async with aiosqlite.connect(database.DB_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT status FROM diet_programs WHERE tg_id=?", (str(TEST_USER_ID),))
+            progs = await cur.fetchall()
+            ok = len(progs) == 1 and progs[0]["status"] == "active"
+            step("§20-8: активная программа сохранена", ok,
+                 "" if ok else f"programs={len(progs)}")
+
+            cur = await conn.execute(
+                "SELECT start_date, end_date, status FROM weekly_plans WHERE tg_id=?",
+                (str(TEST_USER_ID),))
+            plans = await cur.fetchall()
+            ok = (
+                len(plans) == 1
+                and plans[0]["status"] == "active"
+                and (date.fromisoformat(plans[0]["end_date"])
+                     - date.fromisoformat(plans[0]["start_date"])).days == 6
+            )
+            step("§20-8: план = календарная неделя [start..start+6]", ok,
+                 "" if ok else str([dict(p) for p in plans]))
+
+            cur = await conn.execute(
+                "SELECT start_date, days FROM weekly_plans WHERE tg_id=?",
+                (str(TEST_USER_ID),))
+            plan_row = await cur.fetchone()
+            # PATCH-4: meal_state повторяет фактические слоты плана (без шаблона 7×3/7×4):
+            # сверяем с extract_meal_slots по сохранённому JSON дней — это сильнее,
+            # чем хрупкая проверка на конкретное число.
+            from planner.slots import extract_meal_slots
+            expected = sorted(
+                str(i) + ":" + slot
+                for i, day in enumerate(json.loads(plan_row["days"]))
+                for slot, _ref in extract_meal_slots(day, i)
+            )
+            cur = await conn.execute(
+                "SELECT day_date, meal_slot FROM meal_state WHERE tg_id=?",
+                (str(TEST_USER_ID),))
+            actual = sorted(
+                str((date.fromisoformat(r["day_date"])
+                     - date.fromisoformat(plan_row["start_date"])).days) + ":" + r["meal_slot"]
+                for r in await cur.fetchall()
+            )
+            ok = bool(plan_row) and expected == actual
+            n_slots = len(actual)
+            step("§20-8: meal_state = фактические слоты плана (PATCH-4)", ok,
+                 "" if ok else f"expected={len(expected)} actual={n_slots} "
+                               f"plan_days={plan_row['days'][:120] if plan_row else '-'}")
+
+            today = await planner.get_today_meals(conn, str(TEST_USER_ID))
+            plan_slot_set = {
+                slot for _i, day in enumerate(json.loads(plan_row["days"]))
+                for slot, _r in extract_meal_slots(day, _i)
+            }
+            ok = (
+                bool(today)
+                and {m["meal_slot"] for m in today} == plan_slot_set
+                and all(m["day_date"] == date.today().isoformat() for m in today)
+            )
+            step("§20-8: canonical chain get_today_meals работает", ok,
+                 "" if ok else f"today={sorted(m['meal_slot'] for m in today)} "
+                               f"expected_slots={sorted(plan_slot_set)}")
+    except Exception as e:  # noqa: BLE001 — инварианты не маскируют исход флоу
+        step("§20-8: инварианты домена", False, repr(e))
+
     return no_error and all(ok for _, ok, _ in STEP_RESULTS)
 
 
@@ -298,7 +373,12 @@ async def main() -> int:
 
     # Тот же состав и порядок роутеров, что в bot.start_bot()
     from bot_handlers.recipes import router as recipes_router
-    from bot_handlers.schedule import router as schedule_router
+    try:
+        from bot_handlers.schedule import router as schedule_router
+    except ModuleNotFoundError as e:  # локально нет apscheduler — роутер fallback,
+        # флоу пикера его не использует; на сервере грузится штатно
+        print(f"⚠️  schedule-роутер пропущен ({e}) — локальный прогон")
+        schedule_router = None
     from bot_handlers.diet_picker import router as picker_router
     from bot_handlers.reactions import router as reactions_router
     from bot_handlers.meal_schedule_v2 import router as meal_v2_router
@@ -311,8 +391,42 @@ async def main() -> int:
     dp.include_router(cabinet_router)    # FSM кабинета
     dp.include_router(picker_router)     # FSM подбора диеты
     dp.include_router(recipes_router)    # FSM рецептов
-    dp.include_router(schedule_router)   # старый schedule (fallback)
+    if schedule_router is not None:
+        dp.include_router(schedule_router)   # старый schedule (fallback)
     dp.include_router(bot.router)        # общие хендлеры
+
+    # §20-8: гарантируем схему на временной копии (идемпотентно, CREATE IF NOT EXISTS)
+    await database.init_db()
+
+    # §20-8: прод-схема user_profiles шире базовой — часть колонок существует
+    # только как runtime-ALTER'ы (puhlyash_settings._ensure_columns + live-ALTER'ы
+    # кабинетa/расписания). На пустой E2E-БД поднимаем их идемпотентно —
+    # те же определения, что в prod-хендлерах. Харнесс-only, прод-код не трогаем.
+    RUNTIME_COLUMNS = [
+        "puhlyash_name TEXT DEFAULT 'Пухляш'",
+        "puhlyash_specialty TEXT DEFAULT 'всё подряд'",
+        "puhlyash_tone TEXT DEFAULT 'friendly'",
+        "puhlyash_catchphrase TEXT",
+        "puhlyash_emoji TEXT DEFAULT '🍝'",
+        "cook_level TEXT DEFAULT 'beginner'",
+        "experiment_level TEXT DEFAULT 'sometimes'",
+        "budget_level TEXT DEFAULT 'normal'",
+        "max_cook_time INTEGER DEFAULT 30",
+        "recipe_day_time TEXT",
+        "recipe_day_enabled INTEGER DEFAULT 0",
+        "active_diet_mode TEXT",
+        "meal_breakfast TEXT",
+        "meal_lunch TEXT",
+        "meal_dinner TEXT",
+        "notifications_enabled INTEGER DEFAULT 1",
+    ]
+    async with aiosqlite.connect(database.DB_PATH) as _db:
+        for _col in RUNTIME_COLUMNS:
+            try:
+                await _db.execute(f"ALTER TABLE user_profiles ADD COLUMN {_col}")
+            except Exception:
+                pass  # колонка уже есть (копия прод-БД) — идемпотентность
+        await _db.commit()
 
     print(f"▶ Прогон E2E (user_id={TEST_USER_ID}, fast={ARGS.fast})")
     t0 = time.monotonic()

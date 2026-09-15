@@ -275,6 +275,13 @@ def _fmt_week_plan(plan: dict, diet_name: str) -> str:
 
 @router.message(F.text.in_(["🎯 Подобрать диету", "🔍 Найти диету"]))
 async def btn_pick_diet(message: Message, state: FSMContext):
+    # §20-7: старт онбординга — own-try: сбой аналитики не ломает пользовательский флоу
+    try:
+        async with aiosqlite.connect(DB_PATH, timeout=30) as ev_db:
+            await planner.log_event(ev_db, "onboarding_started", str(message.from_user.id))
+            await ev_db.commit()
+    except Exception as e:  # noqa: BLE001
+        log.error("onboarding_started event failed: %s", e)
     await state.set_state(PickerStates.goal)
     await message.answer(
         "🎯 <b>Подбор диеты</b>\n\n"
@@ -360,6 +367,14 @@ async def got_activity(message: Message, state: FSMContext):
              data.get("restrictions", ""), data.get("activity", ""))
         )
         await db.commit()
+        # §20-7: onboarding_completed — строго ПОСЛЕ commit профиля; сбой
+        # аналитики не ломает флоу и не откатывает upsert (own-try контракт)
+        try:
+            await planner.log_event(db, "onboarding_completed", tg_id,
+                                    {"goal": data.get("goal", "")})
+            await db.commit()
+        except Exception as e:  # noqa: BLE001
+            log.error("onboarding_completed event failed: %s", e)
 
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🚀 Подбирай!"), KeyboardButton(text="❌ Отмена")]
@@ -468,6 +483,10 @@ async def chose_diet(message: Message, state: FSMContext):
                     days=plan.get("days", []),
                     shopping_list=plan.get("shopping_list") or [],
                     tips=plan.get("tips") or [],
+                    # §20-7: plan_viewed атомарно с bundle (пользователь увидел план)
+                    extra_events=[
+                        ("plan_viewed", {"diet_name": diet_name}),
+                    ],
                 )
         except planner.SlotsError as e:
             # план пользователю уже отправлен; запись в домен — громкий отказ в лог
