@@ -79,9 +79,10 @@ chmod 600), рестарт чистый (RC=0, без зомби-этапа), н
 
 ## 5. §5 Остаточные действия
 
-**R3 — 9 ключей Gemini (🔴 сделать сейчас):** AI Studio → удалить ключи
-(отпечатки в `TASK_SECRET_ROTATION_2026-09-16.md` §1.3). Прод-пул не трогать
-(1 ключ `AIzaSyB5...omeQ`, не из утёкших). Verify: E2E с LLM зелёный.
+**R3 — 9 ключей Gemini: ✅ ВЫПОЛНЕНО И ВЕРИФИЦИРОВАНО 2026-09-16.** Ключи удалены
+владельцем в AI Studio. Контрольный E2E с реальным LLM на whimco: **PASS exit 0**
+(карточки 2.9s, план 4.5s — реальные вызовы API; KeyPool: gemini 3 + groq 3;
+§20-8 инварианты целы; прод-пул `AIzaSyB5...omeQ` не задет, прод-конфиг не менялся).
 
 **R4 — GitHub PAT (`ghp_…` в remote URL):** revoke в Settings → Developer
 settings → выпустить fine-grained (только diet_platform/contents) →
