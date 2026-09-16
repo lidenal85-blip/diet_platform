@@ -1,0 +1,151 @@
+# 🔐 TASK: Ротация скомпрометированных секретов + чистка git-истории
+
+> Дата: 2026-09-16 · Статус: **ЗАДАЧА — НИЧЕГО НЕ ВЫПОЛНЕНО**
+> Источник находки: шаг B деплоя §20-9 (dry-run гейт) + последующий аудит 2026-09-16.
+> Все факты ниже проверены командами, не со слов. Отпечатки секретов маскированы намеренно.
+
+---
+
+## 1. Факты утечки (верифицировано 2026-09-16)
+
+### 1.1 Трекаемый файл с секретами — на HEAD, не только в истории
+
+```
+git ls-files | grep -i "\.env"   →  .env.bak-20260630181938  ← ТРЕКАЕТСЯ СЕЙЧАС
+```
+
+- Попал в репо первым коммитом: **`15c35be` «Auto-sync: maintenance update» (2026-07-01)**.
+- `.gitignore` содержит `.env` (строка 4), но **не** `.env.bak*` — файл прошёл мимо игнора.
+- История файла: ровно один коммит (`15c35be`), дальше не менялся.
+
+### 1.2 Секреты уже на GitHub
+
+```
+git ls-remote origin main  →  15c35be3f9404b6677223359f8adaf827ee08b58
+```
+
+`origin/main` стоит **ровно на утёкшем коммите** → файл с секретами физически лежит на
+`github.com/lidenal85-blip/diet_platform`. Считать скомпрометированным независимо от
+приватности репо.
+
+### 1.3 Что именно утекло (из `.env.bak-20260630181938`)
+
+| Секрет | Кол-во | Отпечатки (маскировано) | Статус |
+|---|---|---|---|
+| `GEMINI_API_KEY` | 1 | `AIzaSyAJ...If9M` | 🔴 утёк |
+| `GEMINI_KEYS` | 8 | `AIzaSyB4...AeT4`, `AIzaSyCk...r1o8`, `AIzaSyB8...chOE`, `AIzaSyDo...ydaw`, `AIzaSyAZ...7l8U`, `AIzaSyDy...aW9M`, `AIzaSyBg...lm3Q`, `AIzaSyAo...Ebw8` | 🔴 утекли |
+| `TELEGRAM_BOT_TOKEN` | 1 | md5: `00f93beab1` (46) | 🔴 **СОВПАДАЕТ С ПРОДОМ** |
+| `USERBOT_RELAY_TOKEN` | 1 | md5: `7e1aaa207f` (43) | 🔴 прод-значение не проверялось → считать утёкшим |
+
+**Итого 9 ключей Gemini + токен продового бота + relay-токен.**
+
+### 1.4 Blast radius: прод-пул НЕ задет ротацией Gemini
+
+Прод `.env` (whimco, fingerprint-проверка 2026-09-16): пул = **1 ключ** `AIzaSyB5...omeQ`
+(+2 не-Gemini записи len=53, вероятно `gsk_` Groq). **Ни один из 9 утёкших ключей в
+прод-пул не входит** → ротация утёкших Gemini-ключей не требует трогать прод-конфиг.
+
+Но `TELEGRAM_BOT_TOKEN` продовый утёк **целиком** → бот может быть перехвачен кем угодно.
+
+### 1.5 Бонус-утечка: GitHub PAT в remote URL
+
+```
+git remote -v  →  https://lidenal85-blip:ghp_***@github.com/...
+```
+
+PAT вшит в `.git/config` открытым текстом (и засветился в выводе сессии 2026-09-16).
+Тоже подлежит ротации.
+
+---
+
+## 2. План ротации (порядок важен)
+
+### Шаг R1 — немедленно: TELEGRAM_BOT_TOKEN (единственный активно-опасный)
+
+1. @BotFather → `/mybots` → бот «Пухляш» → API Token → **Revoke** → новый токен.
+2. Обновить `TELEGRAM_BOT_TOKEN` в `/opt/diet_platform/.env` на whimco.
+3. Рестарт `diet-platform.service` (см. §5 — зомби-хрупкость).
+4. Проверка: `/health` ok, бот отвечает на `/start`, в логе 0 Traceback.
+5. Проверить, что старый токен больше не отвечает: `curl https://api.telegram.org/bot<СТАРЫЙ>/getMe` → 401.
+
+ downtime ≈ 1 рестарт; новое сообщение пользователей при revocation прерывается только на время рестарта.
+
+### Шаг R2 — немедленно: USERBOT_RELAY_TOKEN
+
+Владелец знает механизм relay → revoke/перевыпуск на стороне сервиса, обновить прод `.env`
+(если переменная реально используется в рантайме — `building_blocks/config.py`,
+`vault_integration.py`).
+
+### Шаг R3 — ротация 9 утёкших Gemini-ключей (zero-impact на прод)
+
+1. AI Studio → удалить все 9 ключей (отпечатки в §1.3 для сверки).
+2. Выпустить замену только если где-то вне прода ещё используются (локальные дев-среды —
+   владелец знает). Прод-пул не трогать: его ключ не из утёкших.
+3. Сверка после: отпечаток прод-ключа на whimco остался `AIzaSyB5...omeQ`, E2E с LLM зелёный.
+
+### Шаг R4 — GitHub PAT
+
+1. GitHub → Settings → Developer settings → PAT → **Revoke** `ghp_Ito9...`.
+2. Выпустить новый (fine-grained, только diet_platform, только contents).
+3. Убрать PAT из remote URL: `git remote set-url origin https://github.com/lidenal85-blip/diet_platform.git`
+   + credential helper (`git config credential.helper store` — с осознанием того же риска,
+   лучше SSH-ключ).
+
+### Шаг R5 — чистка рабочего дерева (до переписывания истории)
+
+```bash
+git rm --cached .env.bak-20260630181938
+printf "\n# env-семейство целиком (бэкапы .env тоже секреты)\n.env.*\n*.env.bak*\n" >> .gitignore
+git add .gitignore && git commit -m "chore(security): untrack .env.bak, ignore env backups"
+```
+
+Дополнительно (обязательная сверка перед R6): `git ls-files | grep -iE "env|secret|token|key|\.bak"`
+— убедиться, что других трекаемых секретоносцев нет (`.env.example` — плейсхолдеры, ок).
+
+### Шаг R6 — чистка git-истории (переписывание)
+
+Ограничение: локальный `main` = `15c35be` + 10 непушенных коммитов (включая C-2/C-3 и
+деплой-доки); сервер **не git-клон** — переписывание на прод не влияет.
+
+```bash
+pip install git-filter-repo   # или pipx
+git filter-repo --invert-paths --path .env.bak-20260630181938 --force
+# гейт:
+git log --all --oneline -- .env.bak-20260630181938        # → пусто
+git show 15c35be --stat | grep env.bak                     # → пусто
+# затем пере-добавить origin (filter-repo его сносит) и force-push:
+git remote add origin https://github.com/lidenal85-blip/diet_platform.git
+git push --force origin main
+```
+
+⚠️ После force-push GitHub может ещё держать объекты в кэше (unreachable) — см. §4 риски.
+Альтернатива при нежелании переписывать: удалить репо и recreate (жёстче, но проще).
+
+---
+
+## 3. DoD (Definition of Done)
+
+- [ ] R1–R4: все 4 типа секретов перевыпущены; старые значения отвечают 401/403.
+- [ ] Прод-бот работает на новом токене; `/health` ok; E2E на whimco зелёный.
+- [ ] `.env.bak-20260630181938` не трекается; `.gitignore` покрывает env-бэкапы.
+- [ ] `git log --all -- .env.bak-20260630181938` пуст; origin/main переписан force-push-ом.
+- [ ] Прод-пул Gemini не изменился (`AIzaSyB5...omeQ`), E2E с LLM на сервере PASS.
+- [ ] `git ls-files` не содержит ни одного файла с реальными секретами.
+- [ ] TEAM_NOTES.md дополнен уроком: env-файлы (включая *.bak) никогда не коммитятся.
+
+## 4. Риски
+
+| Риск | Митигация |
+|---|---|
+| Force-push ломает чужие клоны | Клонов кроме локального нет (сервер без git); подтверждено при деплое §20-9 |
+| GitHub кэширует unreachable-объекты | После force-push: Support request на GC / или recreate-репо; секреты к тому моменту уже ротированы — история больше не опасна |
+| Рестарт бота при R1 упрётся в SIGTERM | Известная хрупкость: ждать TimeoutStopSec → systemd SIGKILL сам; не паниковать, дождаться нового PID (задокументировано в DEPLOY_PLAN §8) |
+| Relay-механика сломается после R2 | Обновлять токен в проде синхронно с перевыпуском; проверять по живому флоу |
+| PAT в credential store повторит уязвимость | Предпочесть SSH-ключ для origin |
+
+## 5. Откаты
+
+- Ротация токенов не откатывается по определению (revoked). Откат возможен только
+  «назад к старому токену» **до** revoke в BotFather — поэтому менять прод `.env`
+  синхронно с выпуском нового, revoke — последним.
+- История: точка до `git filter-repo` = backup `git bundle create /tmp/dp_history.bundle --all`.
