@@ -80,7 +80,7 @@ class VaultSecretLoader:
         if keys is None:
             keys = [
                 "GEMINI_API_KEY", "GEMINI_KEYS", "GEMINI_MODEL",
-                "TELEGRAM_BOT_TOKEN", "USERBOT_RELAY_TOKEN",
+                "TELEGRAM_BOT_TOKEN",
                 "SERPAPI_KEY", "VAULT_API_KEY",
             ]
 

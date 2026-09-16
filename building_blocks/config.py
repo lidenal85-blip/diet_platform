@@ -21,9 +21,6 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = ""
 
-    # Userbot Relay (den4ik-claude) — см. CONFLICT-01 в TEAM_NOTES.md
-    userbot_relay_token: str = ""
-
     # Search
     serpapi_key: str = ""
     max_urls_per_query: int = 5
@@ -95,7 +92,6 @@ class Settings(BaseSettings):
                 "GEMINI_KEYS": "gemini_keys",
                 "GEMINI_MODEL": "gemini_model",
                 "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
-                "USERBOT_RELAY_TOKEN": "userbot_relay_token",
                 "SERPAPI_KEY": "serpapi_key",
                 "DATABASE_PATH": "database_path",
                 "VAULT_API_KEY": "vault_api_key",
