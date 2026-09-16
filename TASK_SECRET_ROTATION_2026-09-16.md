@@ -131,7 +131,13 @@ git add .gitignore && git commit -m "chore(security): untrack .env.bak, ignore e
 
 ### Шаг R6 — чистка git-истории (переписывание)
 
-> **Статус 2026-09-16: рерайт ВЫПОЛНЕН ЛОКАЛЬНО, force-push ждёт новые креды.**
+> **Статус 2026-09-16: ЗАВЕРШЕНО ПОЛНОСТЬЮ.** Рерайт (23 коммита, HEAD `0fb4d59`) →
+> гейты чистые → force-push выполнен через новый PAT (`15c35be…759a1e3 forced update`),
+> **remote tip = local HEAD (`759a1e3`) — PUSH-VERIFIED**; файла на remote больше нет
+> (GET contents → 404). gh CLI ре-авторизован тем же PAT — helper для будущих push
+> починен. Локальный `.git` почищен `gc --prune=now` (объект `15c35be` удалён).
+> Осталось: GitHub Support на GC unreachable-объектов (необязательно: все секреты
+> уже мертвы). Бэкап пре-рерайта: `/tmp/dp_history_pre_r6.bundle` (⚠️ в /tmp).
 >
 > 1. **Бэкап-точка отката:** `/tmp/dp_history_pre_r6.bundle` (полная история до
 >    рерайта, verify OK; ⚠️ лежит в /tmp телефона — сохранить до перезагрузки).
@@ -182,12 +188,21 @@ git push --force origin main
 - [x] R3: 9 утёкших Gemini-ключей удалены в AI Studio владельцем; прод-пул не тронут (`AIzaSyB5...omeQ`), E2E с LLM на whimco PASS exit 0.
 - [ ] Прод-бот работает на новом токене; `/health` ok; E2E на whimco зелёный.
 - [ ] `.env.bak-20260630181938` не трекается; `.gitignore` покрывает env-бэкапы.
-- [ ] `git log --all -- .env.bak-20260630181938` пуст; origin/main переписан force-push-ом.
+- [x] `git log --all -- .env.bak-20260630181938` пуст; origin/main переписан force-push-ом (PUSH-VERIFIED: remote tip = `759a1e3`; файл на remote → 404).
 - [ ] Прод-пул Gemini не изменился (`AIzaSyB5...omeQ`), E2E с LLM на сервере PASS.
 - [ ] `git ls-files` не содержит ни одного файла с реальными секретами.
 - [ ] TEAM_NOTES.md дополнен уроком: env-файлы (включая *.bak) никогда не коммитятся.
 
-## 4. Риски
+## 4. Риски (все закрыты 2026-09-16)
+
+| Риск | Статус |
+|---|---|
+| Force-push ломает чужие клоны | ✅ Клонов нет (сервер не git-клон); push выполнен, verified |
+| GitHub кэширует unreachable-объекты | 🟡 Технически остаётся до GC; **не опасно**: все секреты уже мертвы (R1/R3/R4) — Support-запрос опционален |
+| Рестарт бота при R1 упрётся в SIGTERM | ✅ Прошёл чисто (RC=0, без зомби-этапа) |
+| Relay-механика сломается после R2 | ✅ Снят реверификацией: подсистема мертва (нет процессов/юнитов/файлов/consumers) |
+| PAT в credential store повторит уязвимость | 🟡 Новый PAT в `~/.git-credentials` + gh hosts.yml — тот же класс хранения; ротация при следующем инциденте; SSH-ключ для GitHub — кандидат на Phase 1 |
+| 🆕 gh CLI credential helper перебивает store | ✅ Найден и устранён: gh ре-авторизован тем же PAT (helper больше не подсовывает мёртвый токен) |
 
 | Риск | Митигация |
 |---|---|
