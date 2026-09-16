@@ -16,3 +16,7 @@ venv/
 *.bak_*
 *.swp
 .*.swp
+
+# env-семейство (бэкапы .env тоже секреты)
+.env.*
+!.env.example
