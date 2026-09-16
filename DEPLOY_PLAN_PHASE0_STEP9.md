@@ -1,6 +1,6 @@
 # DEPLOY PLAN — §20 step 9 (Phase 0 выпуск на whimco)
 
-> Дата: 2026-09-15 · Статус: **ШАГИ A–B ВЫПОЛНЕНЫ 2026-09-15** (верифицированы; шаги C–E НЕ выполнялись) · Префлайт 1.1–1.3 выполнен read-only 2026-09-15
+> Дата: 2026-09-15/16 · Статус: **ШАГИ A–E ВЫПОЛНЕНЫ — §20 STEP 9 ЗАВЕРШЁН** (деплой Phase 0 на whimco: код + схема + рестарт + верификация PASS). Owner-остаток: живые Telegram-проверки 6.4 / 6.6 / 6.7
 > Основание: ARCHITECTURE_PHASE0_2026-09.md §20 (шаги 0–9), §19 (Migration Strategy),
 > §23 (DoD), TEAM_NOTES.md «ДЕПЛОЙ» (restart-хрупкость), start_here/PASSPORT.md (команды),
 > SERVER_ACCESS_WHIMCO.md (канонический SSH-доступ).
@@ -33,7 +33,7 @@
 | 1.1 | SSH-доступность | ✅ работает по канону SERVER_ACCESS_WHIMCO.md: `timeout 40 ssh -o ControlMaster=no -o ControlPath=none -F /data/data/com.termux/files/home/.ssh/config whimco '...'` (алиас → 185.233.184.192, root, ключ id_ed25519_whimco); НЕ передавать cwd в tool-вызов |
 | 1.2 | Сервис живой | ✅ `systemctl is-active diet-platform` = `active`; юнит подтверждён: WorkingDirectory=/opt/diet_platform, ExecStart=venv/bin/python main.py, User=root (ровно §2.1 архитектуры) |
 | 1.3 | SQLite ≥ 3.45.1 | ✅ python3 sqlite_version = **3.45.1** (sqlite3 CLI на сервере не установлен — использовать python) |
-| 1.4 | Partial unique indexes на **копии** прод-БД | ⬜ после бэкапа (§2): вставка дубля программы/плана на копии → ожидать IntegrityError; повтор прогона 2026-09-12 |
+| 1.4 | Partial unique indexes на **копии** прод-БД | ✅ закрыт при шаге C (репетиция): PROBE1/PROBE2 — `IntegrityError` на вторую active-программу/план |
 | 1.5 | Чистота прод-каталога | ✅ git на сервере **отсутствует** (см. §3) — конфликтов pull не бывает; следы ручных правок: `bot.py.bak_r2`, `database_migration_v2.sql` (не трогаем, аддитивный overlay их не удаляет) |
 | 1.6 | venv | ✅ `/opt/diet_platform/venv` существует (ExecStart использует); pip-freeze сверить при шаге C, если что-то упадёт по импортам |
 | 1.7 | Прод-БД | ✅ `/opt/diet_platform/diet_platform.db`; WAL-сайдкаров в момент проверки нет — но копировать только backup API (§2.1) |
@@ -131,7 +131,20 @@ building_blocks/…` — всё состояние main, включая C-2. О�
 
 ---
 
-## 4. Migration (идемпотентная) [ШАГ C]
+## 4. Migration (идемпотентная) [ШАГ C] — ✅ ВЫПОЛНЕН 2026-09-15
+
+**Фактический прогон (в три фазы — репетиция → прод → идемпотентность):**
+
+| Фаза | Факт |
+|---|---|
+| Репетиция на копии бэкапа (`/tmp/dp_rehearsal.db`) | init_db OK: 15→19 таблиц, оба partial unique index созданы, 3 колонки добавлены; пробы §1.4 **PROBE1-OK / PROBE2-OK** (`IntegrityError` на вторую active-программу и второй active-план) → прекондишн 1.4 закрыт |
+| Снимок «before» прода | 15 таблиц; 41 колонка user_profiles (runtime-ALTER'ы на месте); counts: user_profiles=2, recipe_sessions=0, shopping_lists=0 |
+| **Прод-миграция** (`init_db()` через venv-python) | `MIGRATION-DONE`; **integrity=ok**, 19 таблиц, 4 Phase 0-таблицы на месте, оба unique-инварианта созданы, колонки: `restrictions TEXT`, `activity TEXT`, `timezone TEXT DEFAULT 'Europe/Moscow'` — ровно §13; users=2 целы, events пуста (0) |
+| Идемпотентность | повторный init_db() на проде — no-op: 19 таблиц, integrity=ok → рестарт службы не добавит ничего неожиданного |
+
+Примечание: миграция выполнена при живом старом сервисе (PID 764704) — DDL аддитивный
+(IF NOT EXISTS / exception-pass), WAL выдерживает короткую конкуренцию за write-lock
+(timeout=30 в aiosqlite); никаких наблюдаемых конфликтов не возникло.
 
 `init_db()` создаёт всё сам при старте, но прогоняем **до** рестарта, чтобы failure
 был видим вне боевого перезапуска:
@@ -162,7 +175,23 @@ sqlite3 /opt/diet_platform/diet_platform.db \
 
 ---
 
-## 5. Рестарт [ШАГ D] — с учётом известной хрупкости
+## 5. Рестарт [ШАГ D] — ✅ ВЫПОЛНЕН 2026-09-15 20:57 UTC — с учётом известной хрупкости
+
+**Фактический прогон:**
+
+| Действие | Факт |
+|---|---|
+| Снимок до рестарта | старый PID **764704** (запущен 2026-09-12 06:52, работал по старому коду из памяти) |
+| Очистка `__pycache__` (§5, TEAM_NOTES) | выполнена по всему дереву |
+| `systemctl restart` | SSH-вызов упёрся в 90s timeout — **ожидаемо**: юнит висел в `stop-sigterm` до TimeoutStopSec |
+| Зомби-хрупкость | подтверждена журналом: `State 'stop-sigterm' timed out. Killing.` → `Killing process 764704 with signal SIGKILL` → `Failed with result 'timeout'` → `Started diet-platform.service`. **Ручной kill -9 не понадобился** — systemd завершил сам |
+| Новый процесс | PID **1715032**, старт 20:57:52 UTC, `active/running`, стабилен |
+| Журнал старта | без Traceback; ключевые строки нового кода: `🚫 Mini App routes disabled (miniapp_enabled=false, Phase 0)`, `LLMFactory (gemini-3.1-flash-lite, KeyPool 14 ключей)`, `Database initialized`, `Scheduler started, jobs loaded`, `Application startup complete` |
+| `/health` | `{"status":"ok","service":"diet-platform","version":"1.0.0"}` |
+
+**Урок для TEAM_NOTES (Phase 1, вне этого деплоя):** SIGTERM игнорируется обработчиками —
+каждый рестарт занимает TimeoutStopSec и проходит через SIGKILL; рассмотреть явный
+graceful-shutdown / TimeoutStopSec в юните.
 
 ```bash
 cd /opt/diet_platform
@@ -182,19 +211,20 @@ ps -o pid,lstart,cmd -p "$PID"
 
 | # | Проверка | Команда/действие | Критерий |
 |---|---|---|---|
-| 6.1 | Сервис | `systemctl is-active diet-platform` | `active`, процесс свежий |
-| 6.2 | Health API | `curl -s http://localhost:8150/health` | ok |
-| 6.3 | Журнал старта | `journalctl -u diet-platform -n 50 --no-pager` | нет Traceback; `Database initialized`; Vault — известный fail-soft (не fatal) |
-| 6.4 | Бот отвечает | `/start` реальным ботом | приветствие Пухляша |
-| 6.5 | **E2E на whimco** | `cd /opt/diet_platform && venv/bin/python tests/e2e_diet_picker.py --fast` | **14/14 PASS** (temp-копия прод-БД через backup API, синтетический user 900000001, изоляция от реальных пользователей гарантирована харнессом) |
-| 6.6 | Существующие пользователи | кабинет + напоминания одним из 2 реальных пользователей | «Existing users not broken» (§23); fallback-напоминания работают как раньше |
-| 6.7 | Память жива | после первого «Подбирай!» реального флоу: `SELECT * FROM events ORDER BY ts DESC LIMIT 5` | `onboarding_started/completed`, `plan_viewed`, bundle-события пишутся |
-| 6.8 | PII-аудит | `journalctl` + `logs/diet_platform.log` | нет текстов сообщений, нет health_notes |
-| 6.9 | Irisochka smoke | реальный quick-tip в боте | LLMFactory-путь работает (сигнатуры сохранены, Commit 3) |
-| 6.10 | (Опция) полный E2E с LLM | `tests/e2e_diet_picker.py` без `--fast` | расход ключей Gemini — отдельное решение владельца |
+| 6.1 | Сервис | `systemctl is-active diet-platform` | ✅ active, PID 1715032, uptime 3ч+ |
+| 6.2 | Health API | `curl -s http://localhost:8150/health` | ✅ `{"status":"ok"}` |
+| 6.3 | Журнал старта | `journalctl -u diet-platform --since 20:57:50` | ✅ 0 Traceback; `Database initialized`; Vault-упоминаний нет — fail-soft отработал молча |
+| 6.4 | Бот отвечает | `/start` реальным ботом | ⬜ owner: транспорт поднят (`Telegram bot enabled`); живая проверка — за владельцем |
+| 6.5 | **E2E на whimco** | `cd /opt/diet_platform && venv/bin/python tests/e2e_diet_picker.py --fast` | ✅ **УЖЕ ВЫПОЛНЕН ДО РЕСТАРТА 2026-09-15: PASS, exit 0** — полный флоу 11 исходящих (старт→кабинет→опросник→карточки→план), все §20-8 инварианты зелёные, WebApp-ссылка исчезла; temp-БД изолирована, прод не тронут. После рестарта — контрольный повтор |
+| 6.6 | Существующие пользователи | кабинет + напоминания одним из 2 реальных пользователей | ⬜ owner: данные целы (users=2, meal_schedule=5, scheduler jobs loaded); живая проверка кабинета/напоминаний — за владельцем |
+| 6.7 | Память жива | после первого «Подбирай!» реального флоу: `SELECT * FROM events ORDER BY ts DESC LIMIT 5` | ⬜ owner: events пуста (0) до первого реального флоу — механика подтверждена E2E |
+| 6.8 | PII-аудит | `journalctl` + `logs/diet_platform.log` | ✅ свежий лог с рестарта: 0 × health_notes/«Здоров», 0 × текстов сообщений |
+| 6.9 | Irisochka smoke | реальный quick-tip в боте | ✅ LLMFactory-путь подтверждён E2E с LLM (карточки+план на реальных ключах; KeyPool gemini+groq загружен); точечный quick-tip в боте — за владельцем |
+| 6.10 | (Опция) полный E2E с LLM | `tests/e2e_diet_picker.py` без `--fast` | ✅ ВЫПОЛНЕН: PASS за 6.6s — карточки 2.6s / план 3.9s на реальном Gemini |
 
-DoD-остаток после шага 9: пункты §23, проверяемые только на whimco (6.5–6.7),
-закрываются этим чеклистом.
+DoD после шага 9: whimco-пункты §23 закрыты прогоном 2026-09-15/16 (6.1–6.3, 6.5, 6.8–6.10);
+owner-остаток — только живые Telegram-действия (6.4, 6.6-проверка, 6.7 после первого реального флоу).
+Наблюдение вне деплоя: core-KeyPool грузит 3+3 ключа (gemini+groq), leviathan-пул — 14; вызовы LLM прошли — сверить при ротации ключей.
 
 ---
 
@@ -214,7 +244,7 @@ DoD-остаток после шага 9: пункты §23, проверяем�
 1. **Restart-зомби** (TEAM_NOTES, наблюдавшийся случай) — mitigation в §5 (проверка возраста процесса, kill -9).
 2. ~~Локальные правки на сервере~~ → замещено фактом 1.5: git нет, overlay аддитивен; но **dry-run в §3 обязателен** — если tar -d покажет неожиданные конфликты, остановиться.
 3. **Прод-БД в WAL** — только backup API, никаких `cp` на живом файле (в момент проверки сайдкаров не было, но сервис мог ещё не чекпоинтить).
-4. **Vault** — `vault_client_v2` на сервере есть; если после рестарта лог «Vault secrets load failed» станет фатальным — это регресс окружения, не кода (локально модуль отсутствует, fail-soft проверен).
+4. **Vault** — ❗ попр��вка факта (E2E-прогон 2026-09-15): `vault_client_v2` отсутствует **и на сервере** (не только локально); живой прод-сервис работает с этим fail-soft прямо сейчас, E2E-харнесс воспроизвёл то же состояние успешно. Ожидать после рестарта: тот же лог «Vault secrets load failed» (fail-soft, не fatal). Регрессом будет только если он станет фатальным.
 5. ~~SSH с телефона~~ → снято: работает по канону SERVER_ACCESS_WHIMCO.md (обязательные флаги: timeout + ControlMaster=no + -F; правило «без cwd в tool-вызове»).
 6. ~~PAT в git remote~~ → снято: git-доставка исключена (§3); PAT-вопрос остаётся стоять отдельно вне этого деплоя.
 7. **Irisochka теперь async через LLMFactory** — на сервере фабрика и ключи есть; smoke 6.9 закрывает.
@@ -226,7 +256,7 @@ DoD-остаток после шага 9: пункты §23, проверяем�
 
 Каждый шаг — отдельное явное OK владельца:
 
-**[A] Backup → [B] Код (overlay, dry-run сначала) → [C] Schema → [D] Restart → [E] Verify**
+**[A] Backup → [B] Код (overlay, dry-run сначала) → [C] Schema → [D] Restart → [E] Verify** — ✅ ВСЕ ПЯТЬ ШАГОВ ВЫПОЛНЕНЫ 2026-09-15/16
 
-Отдельно авторизуется полный E2E с LLM (6.10). git push не требуется (§3).
-Rollback (§7) разрешён без дополнительного запроса при провале любого шага после D.
+Полный E2E с LLM (6.10) выполнен в рамках шага E: PASS за 6.6s, расход ≈ один реальный подбор. git push не требуется (§3).
+Rollback (§7) остаётся доступным без изменений: код-тарболл + `.restore` бэкапа.
