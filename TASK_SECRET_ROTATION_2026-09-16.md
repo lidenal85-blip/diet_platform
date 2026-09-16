@@ -131,8 +131,32 @@ git add .gitignore && git commit -m "chore(security): untrack .env.bak, ignore e
 
 ### Шаг R6 — чистка git-истории (переписывание)
 
-Ограничение: локальный `main` = `15c35be` + 10 непушенных коммитов (включая C-2/C-3 и
-деплой-доки); сервер **не git-клон** — переписывание на прод не влияет.
+> **Статус 2026-09-16: рерайт ВЫПОЛНЕН ЛОКАЛЬНО, force-push ждёт новые креды.**
+>
+> 1. **Бэкап-точка отката:** `/tmp/dp_history_pre_r6.bundle` (полная история до
+>    рерайта, verify OK; ⚠️ лежит в /tmp телефона — сохранить до перезагрузки).
+> 2. **Рерайт:** `git filter-repo --invert-paths --path .env.bak-20260630181938 --force`
+>    — 23 коммита переписаны, HEAD `0fb4d59`, origin снят (штатно) и пере-добавлен
+>    чистым URL (без вшитого PAT).
+> 3. **Гейты:** файл отсутствует во всех деревьях (`--all`, diff-filter=A — none);
+>    уточнённый скан реальных секрет-форматов по полной истории — **0 вхождений**
+>    (широкий первый гейт давал 9 ложных: имена переменных в удалённом wizard'е
+>    и маскированные отпечатки из security-доков); `git fsck --full` чистый;
+>    рабочее дерево чистое; локальный `.env.bak` остался на диске untracked+ignored.
+> 4. **Блокер push:** ВСЕ старые PAT мертвы (вшитый в remote, оба в
+>    `~/.git-credentials`, токен gh CLI — «Invalid username or token»; SSH-ключа
+>    для GitHub нет) → финальный push выполняет владелец.
+>
+> **Ручной шаг владельца (после создания нового PAT в Settings → Developer
+> settings → PAT, доступ к lidenal85-blip/diet_platform):**
+>
+> ```bash
+> cd /storage/emulated/0/PROJECTS/workstation/freebuff/projects_17/diet_platform
+> git push --force origin main
+> git ls-remote origin main   # хэш должен совпасть с git rev-parse HEAD (0fb4d59…)
+> ```
+>
+> После подтверждения: GitHub Support на GC unreachable-объектов; R6 закрыт.
 
 ```bash
 pip install git-filter-repo   # или pipx
