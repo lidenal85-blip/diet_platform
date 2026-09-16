@@ -239,12 +239,23 @@ step "Команда: /mybots → выбери бота «Пухляш» → API
 step "Скопируй НОВЫЙ токен (формат 123456789:ABCdef…). Он показывается один раз!"
 
 NEW_BOT_TOKEN=""
+# ⚠️ НЕ используем ask_secret: он подставил бы «current» из локального .env —
+# а там СТАРЫЙ утёкший токен. Только явный скрытый ввод + защита от старого токена.
+OLD_LOCAL_MD5="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- | md5sum | cut -c1-10 || true)"
 for _try in 1 2 3; do
-  ask_secret NEW_BOT_TOKEN "Вставь НОВЫЙ токен (скрытый ввод):"
-  if [[ "$NEW_BOT_TOKEN" =~ ^[0-9]{8,12}:[A-Za-z0-9_-]{30,}$ ]]; then
+  printf '  %s%s%s ' "$BOLD" "Вставь НОВЫЙ токен (скрытый ввод, без дефолта):" "$RESET"
+  read -rs NEW_BOT_TOKEN || true
+  printf '\n'
+  if [[ -z "$NEW_BOT_TOKEN" ]]; then
+    warn "Пустой ввод. Дефолта нет и быть не должно — вставь токен от BotFather явно."
+  elif [[ "$(printf '%s' "$NEW_BOT_TOKEN" | md5sum | cut -c1-10)" == "$OLD_LOCAL_MD5" ]]; then
+    warn "Это СТАРЫЙ (утёкший) токен — похоже, Enter подставил значение из локального .env."
+    warn "Нужен именно НОВЫЙ токен после Revoke current token в BotFather."
+  elif [[ "$NEW_BOT_TOKEN" =~ ^[0-9]{8,12}:[A-Za-z0-9_-]{30,}$ ]]; then
     break
+  else
+    warn "Не похоже на Telegram-токен. Формат: цифры : букво-цифры (пример 123456789:AAH…)."
   fi
-  warn "Не похоже на Telegram-токен. Формат: цифры : букво-цифры (пример 123456789:AAH…)."
   NEW_BOT_TOKEN=""
 done
 if ! [[ "$NEW_BOT_TOKEN" =~ ^[0-9]{8,12}:[A-Za-z0-9_-]{30,}$ ]]; then
