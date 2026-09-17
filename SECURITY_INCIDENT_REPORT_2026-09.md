@@ -75,8 +75,9 @@
 ## 5. Инфраструктура защиты (осталась после инцидента)
 
 1. **Монитор идентичности бота** — systemd timer на whimco, каждые 5 мин сверяет
-   getMe/getMyName/описание/webhook с эталоном; алерт в journald (+DM при заданном
-   `TELEGRAM_ADMIN_CHAT_ID`). Проверен в бою: после обеих ротаций — `identity OK`.
+   getMe/getMyName/описание/webhook с эталоном; алерт в journald + DM владельцу
+   (`TELEGRAM_ADMIN_CHAT_ID=7709651193`, включён и проверен симуляцией 2026-09-17).
+   Проверен в бою: после обеих ротаций — `identity OK`.
 2. **`.gitignore`** покрывает `.env*` (включая `*.bak`) — проверено `check-ignore`.
 3. **TEAM_NOTES урок №12**: env-файлы (включая `*.bak`) никогда не коммитятся.
 4. Чистая история: `git log --all -- .env.bak-…` пуст, remote tip = переписанный HEAD.
@@ -115,7 +116,7 @@
 |---|---|
 | GitHub держит unreachable-объекты до GC | 🟡 Все секреты мертвы (R1/R3/R4) — риск нулевой; Support-запрос на GC опционален |
 | PAT лежит в `~/.git-credentials` + gh hosts.yml | 🟡 Тот же класс хранения, что привёл к инциденту; **SSH-ключ для GitHub — кандидат на Phase 1** |
-| DM-алерты монитора не активны | 🟡 `TELEGRAM_ADMIN_CHAT_ID` не задан — алерты идут только в journald; задать = 1 строка в прод `.env` |
+| DM-алерты монитора | ✅ **Включены 2026-09-17**: `TELEGRAM_ADMIN_CHAT_ID=7709651193` в прод `.env`; канал проверен доставкой (message_id 1452), полный алерт-путь проверен симуляцией подмены эталона — 🚨 в DM + дедуп через `/run`-state, восстановление → `identity OK` |
 | pre-commit gitleaks | ✅ **Развёрнут 2026-09-17**: gitleaks 8.30.1 (sha256-verified) в `~/.local/bin`; хук `githooks/pre-commit` (staged-scan, fail-open без бинарника) + `scripts/install_hooks.sh` (FUSE/Termux → shim в `\$HOME`); негативный тест (stripe-key) блокирует коммит exit 1, позитивный PASS; попутно gitleaks поймал **реальный** хардкод Vault-ключа в `vault_integration.py:21` — убран из кода (env-only; экспозиция нулевая: попал в GitHub уже после Private, подсистема не развёрнута); историческая находка — `.gitleaksignore` с обоснованием |
 | 2FA на Telegram-аккаунте владельца | 🔲 Ручной шаг владельца (Settings → Two-Step Verification + ревизия Devices) |
 
