@@ -1,0 +1,16 @@
+#!/bin/sh
+# Pre-commit заслон от утечки секретов — урок инцидента 2026-09
+# (см. SECURITY_INCIDENT_REPORT_2026-09.md: .env.bak провисел в публичном GitHub ~2.5 мес).
+# Блокирует коммит, если в staged-изменениях найдены секреты (gitleaks, default rules
+# включают: gemini/telegram/aws/github PAT/generic-api-key и т.д.).
+
+GITLEAKS="$(command -v gitleaks 2>/dev/null || true)"
+[ -z "$GITLEAKS" ] && [ -x "$HOME/.local/bin/gitleaks" ] && GITLEAKS="$HOME/.local/bin/gitleaks"
+
+if [ -z "$GITLEAKS" ]; then
+    echo "⚠️  gitleaks не найден — секрет-скан ПРОПУЩЕН (commit goes through)."
+    echo "   Установка: https://github.com/gitleaks/gitleaks/releases (linux_arm64 -> ~/.local/bin)"
+    exit 0
+fi
+
+exec "$GITLEAKS" git --pre-commit --staged --redact -v

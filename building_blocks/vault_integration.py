@@ -18,7 +18,7 @@ logger = logging.getLogger("diet_platform.vault")
 
 VAULT_URL = os.getenv("VAULT_URL", "http://127.0.0.1:8400")
 PROJECT_ID = os.getenv("VAULT_PROJECT_ID", "diet_platform")
-API_KEY = os.getenv("VAULT_API_KEY", "lev_-nvEajzVSG9F3rxoBA7ltGctDYbW05L8")
+API_KEY = os.getenv("VAULT_API_KEY", "")  # ключ только через env — урок инцидента 2026-09 (никаких секретов в коде)
 
 
 class VaultSecretLoader:
