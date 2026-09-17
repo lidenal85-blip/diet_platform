@@ -344,3 +344,7 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
 11. **GitHub push** — токен всегда должен быть из-под аккаунта `lidenal85-blip`,
     не из других аккаунтов на этом сервере — у них только `pull`. Перед pushом
     стоит сверить `permissions.push: true` через GitHub API
+12. **Env-файлы (включая `*.env.bak*`) НИКОГДА не коммитятся** — урок инцидента
+    2026-09: `.env.bak-…` с реальными секретами провисел в публичном GitHub ~2,5 мес
+    (детали: `TASK_SECRET_ROTATION_2026-09-16.md`, `SECURITY_AUDIT_2026-09-16.md`).
+    `.gitignore` покрывает `.env*`; новые секреты — только через Vault/stdin, не в git.
