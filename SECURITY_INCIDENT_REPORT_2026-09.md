@@ -115,7 +115,7 @@
 | Риск | Статус / митигация |
 |---|---|
 | GitHub держит unreachable-объекты до GC | 🟡 Все секреты мертвы (R1/R3/R4) — риск нулевой; Support-запрос на GC опционален |
-| PAT лежит в `~/.git-credentials` + gh hosts.yml | 🟡 Тот же класс хранения, что привёл к инциденту; **SSH-ключ для GitHub — кандидат на Phase 1** |
+| ~~PAT лежит в `~/.git-credentials`~~ | ✅ **Закрыто 2026-09-17:** ed25519 SSH-ключ (`id_ed25519_github`, fingerprint `SHA256:EzNLy0uPs8Sn+WOAd0cDslD5dwy0/pjcfJ+rAL3OUvA`, 443-fallback через `ssh.github.com`), оба remote на SSH, plaintext-хранилище очищено; gh CLI-токен живёт в `hosts.yml` (chmod 600) только для API-вызовов |
 | DM-алерты монитора | ✅ **Включены 2026-09-17**: `TELEGRAM_ADMIN_CHAT_ID=7709651193` в прод `.env`; канал проверен доставкой (message_id 1452), полный алерт-путь проверен симуляцией подмены эталона — 🚨 в DM + дедуп через `/run`-state, восстановление → `identity OK` |
 | pre-commit gitleaks | ✅ **Развёрнут 2026-09-17**: gitleaks 8.30.1 (sha256-verified) в `~/.local/bin`; хук `githooks/pre-commit` (staged-scan, fail-open без бинарника) + `scripts/install_hooks.sh` (FUSE/Termux → shim в `\$HOME`); негативный тест (stripe-key) блокирует коммит exit 1, позитивный PASS; попутно gitleaks поймал **реальный** хардкод Vault-ключа в `vault_integration.py:21` — убран из кода (env-only; экспозиция нулевая: попал в GitHub уже после Private, подсистема не развёрнута); историческая находка — `.gitleaksignore` с обоснованием |
 | 2FA на Telegram-аккаунте владельца | 🔲 Ручной шаг владельца (Settings → Two-Step Verification + ревизия Devices) |
