@@ -348,3 +348,11 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
     2026-09: `.env.bak-…` с реальными секретами провисел в публичном GitHub ~2,5 мес
     (детали: `TASK_SECRET_ROTATION_2026-09-16.md`, `SECURITY_AUDIT_2026-09-16.md`).
     `.gitignore` покрывает `.env*`; новые секреты — только через Vault/stdin, не в git.
+13. **«Бот жив» ≠ «бот работает»** (2026-09-18). 18-го сентября бот @Fatboyandgirl_bot
+    был деактивирован Telegram на уровне юзер-сущности: Bot API getMe отвечал `ok:true`
+    (кэш реестра), но MTProto давал `deleted=true` и `INPUT_USER_DEACTIVATED` на отправку.
+    Монитор идентичности (сверка getMe) такой отказ не видит. Лечится: (а) зондирующий
+    `sendMessage` от бота в контрольный чат в монитор; (б) при подозрении — MTProto-проба
+    через user-сессию (telethon). Восстановление: тикет в @BotSupport + новый бот
+    @fatboyandgirl2_bot (bot_id 8411010954) за ~40 минут. Урок: Э2Е-проба доставки — часть
+    здоровья бота, не только getMe.
