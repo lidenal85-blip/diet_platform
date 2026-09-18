@@ -352,7 +352,10 @@ curl -X POST http://localhost:8150/api/v1/dlq/retry-all  # перезапуск 
     был деактивирован Telegram на уровне юзер-сущности: Bot API getMe отвечал `ok:true`
     (кэш реестра), но MTProto давал `deleted=true` и `INPUT_USER_DEACTIVATED` на отправку.
     Монитор идентичности (сверка getMe) такой отказ не видит. Лечится: (а) зондирующий
-    `sendMessage` от бота в контрольный чат в монитор; (б) при подозрении — MTProto-проба
+    `sendMessage` от бота в контрольный чат в монитор — **сделано 2026-09-18 (v2:**
+    `scripts/identity_monitor.py`, зондирующий беззвучный зонд+deleteMessage, transient-стрик
+    3 прогона, стойкие 400/401/403 → алерт сразу, recovery-DM; юнит-тесты 13 passed,
+    негатив/позитив/дедуп/recovery проверены на проде**)**; (б) при подозрении — MTProto-проба
     через user-сессию (telethon). Восстановление: тикет в @BotSupport + новый бот
     @fatboyandgirl2_bot (bot_id 8411010954) за ~40 минут. Урок: Э2Е-проба доставки — часть
     здоровья бота, не только getMe.
