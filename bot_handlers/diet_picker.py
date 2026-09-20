@@ -31,7 +31,8 @@ class PickerStates(StatesGroup):
 
 
 def _main_kb():
-    from bot_handlers.recipes import main_kb
+    """C-3.1: единый источник — bot_handlers.keyboards (compat-shim, имя сохранено)."""
+    from bot_handlers.keyboards import main_kb
     return main_kb()
 
 

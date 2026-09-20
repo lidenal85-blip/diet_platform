@@ -30,18 +30,11 @@ cfg = get_settings()
 router = Router()
 
 # ── Постоянная нижняя клавиатура ───────────────────────────
+# C-3.1: единый источник клавиатур — bot_handlers/keyboards.py.
+# Имя MAIN_KEYBOARD сохранено как алиас для обратной совместимости.
+from bot_handlers.keyboards import canonical_main_kb
 
-MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🎯 Подобрать диету"), KeyboardButton(text="👤 Кабинет")],
-        [KeyboardButton(text="🍝 Рецепт от Пухляша"), KeyboardButton(text="👨‍🍳 Рецепты")],
-        [KeyboardButton(text="🧊 Холодильник"), KeyboardButton(text="💰 По бюджету")],
-        [KeyboardButton(text="👨‍🍳 Шеф на телефоне"), KeyboardButton(text="⏰ Расписание")],
-        [KeyboardButton(text="ℹ️ Помощь")],
-    ],
-    resize_keyboard=True,
-    persistent=True,
-)
+MAIN_KEYBOARD = canonical_main_kb()
 
 
 def _main_kb() -> ReplyKeyboardMarkup:
@@ -420,10 +413,12 @@ async def start_bot():
     from bot_handlers.meal_schedule_v2 import router as meal_v2_router
     from bot_handlers.cabinet import router as cabinet_router
     from bot_handlers.puhlyash_settings import router as puhlyash_router
+    from bot_handlers.today import router as today_router
     from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=cfg.telegram_bot_token)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(reactions_router)  # callbacks: лайки, мастер
+    dp.include_router(today_router)      # экран «Сегодня» (C-3.2): ms:* / today:refresh
     dp.include_router(puhlyash_router)   # настройка Пухляша + тест
     dp.include_router(meal_v2_router)    # расписание v2
     dp.include_router(cabinet_router)    # FSM кабинета

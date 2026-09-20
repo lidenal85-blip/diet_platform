@@ -64,13 +64,9 @@ def recipes_kb():
 
 
 def main_kb():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🎯 Подобрать диету"), KeyboardButton(text="👤 Кабинет")],
-        [KeyboardButton(text="🍝 Рецепт от Пухляша"), KeyboardButton(text="👨‍🍳 Рецепты")],
-        [KeyboardButton(text="🧊 Холодильник"), KeyboardButton(text="💰 По бюджету")],
-        [KeyboardButton(text="👨‍🍳 Шеф на телефоне"), KeyboardButton(text="⏰ Расписание")],
-        [KeyboardButton(text="🐈 Пухляш"), KeyboardButton(text="ℹ️ Помощь")],
-    ], resize_keyboard=True, persistent=True)
+    """C-3.1: единый источник — bot_handlers.keyboards (compat-shim, имя сохранено)."""
+    from bot_handlers.keyboards import main_kb as _unified_main_kb
+    return _unified_main_kb()
 
 
 def _fmt(r: dict) -> str:
