@@ -414,11 +414,13 @@ async def start_bot():
     from bot_handlers.cabinet import router as cabinet_router
     from bot_handlers.puhlyash_settings import router as puhlyash_router
     from bot_handlers.today import router as today_router
+    from bot_handlers.my_plan import router as my_plan_router
     from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=cfg.telegram_bot_token)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(reactions_router)  # callbacks: лайки, мастер
     dp.include_router(today_router)      # экран «Сегодня» (C-3.2): ms:* / today:refresh
+    dp.include_router(my_plan_router)    # экран «Мой план» (C-3.3): mp:* / today:open
     dp.include_router(puhlyash_router)   # настройка Пухляша + тест
     dp.include_router(meal_v2_router)    # расписание v2
     dp.include_router(cabinet_router)    # FSM кабинета

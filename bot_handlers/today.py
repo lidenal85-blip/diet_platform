@@ -190,6 +190,12 @@ def _today_kb_with_refresh(meals: list[dict]) -> InlineKeyboardMarkup:
 async def cmd_today(message: Message) -> None:
     """Вход в экран: кнопка «📅 Сегодня» или команда /today."""
     tg_id = str(message.from_user.id)
+    await send_today_screen(message, tg_id)
+
+
+async def send_today_screen(message: Message, tg_id: str) -> None:
+    """Отправить экран «Сегодня» (public API; используется и переходом из
+    «Мой план» — C-3.3). Поведение cmd_today сохранено 1:1."""
     try:
         async with aiosqlite.connect(DB_PATH, timeout=30) as db:
             db.row_factory = aiosqlite.Row
